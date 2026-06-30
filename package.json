@@ -1,0 +1,16 @@
+{
+  "name": "rudy-attack-tool",
+  "version": "1.0.0",
+  "description": "A simple Rudy (Are You Dead Yet?) attack tool for educational purposes.",
+  "main": "modules/main.js",
+  "scripts": {
+    "start": "node modules/main.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "engines": { "node": ">=12.0.0" },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "inquirer": "^8.2.4"
+  }
+}
