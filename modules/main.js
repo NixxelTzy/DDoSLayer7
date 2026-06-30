@@ -339,14 +339,12 @@ class L7Flood {
         }
     }
 
-    async start() {
+    start() {
         this.running = true;
-        const workers = [];
         for (let i = 0; i < this.threadCount; i++) {
-            workers.push(this.runWorker());
+            // Fire-and-forget. The internal loop in runWorker will keep it running.
+            this.runWorker();
         }
-        // This will run until stop() is called
-        await Promise.all(workers);
     }
 
     stop() {
