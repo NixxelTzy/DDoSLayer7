@@ -124,7 +124,7 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
             }).catch(() => {}); // Abaikan error jika pesan tidak berubah
             lastStatusText = statusText;
         }
-    }, 4000); // Update setiap 1 detik untuk feedback yang lebih responsif
+    }, 10000); // Update setiap 1 detik untuk feedback yang lebih responsif
 
     // Atur timeout untuk menghentikan semua worker setelah durasi yang ditentukan
     attackTimeout = setTimeout(() => {
