@@ -9,7 +9,7 @@ const bot = new TelegramBot(token, { polling: true });
 // --- ID PENGGUNA YANG DIIZINKAN ---
 // Tambahkan ID numerik Telegram Anda di sini untuk keamanan.
 // Anda bisa menambahkan lebih dari satu ID, pisahkan dengan koma.
-const AUTHORIZED_USER_IDS = [8962044822];
+const AUTHORIZED_USER_IDS = [8710323660];
 
 let isAttackRunning = false;
 let workers = [];
