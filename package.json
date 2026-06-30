@@ -4,13 +4,14 @@
   "description": "A simple Rudy (Are You Dead Yet?) attack tool for educational purposes.",
   "main": "modules/main.js",
   "scripts": {
-    "start": "node modules/main.js"
+    "start": "node modules/server.js"
   },
   "author": "",
   "license": "ISC",
   "engines": { "node": ">=12.0.0" },
   "dependencies": {
     "chalk": "^4.1.2",
-    "inquirer": "^8.2.4"
+    "inquirer": "^8.2.4",
+    "node-telegram-bot-api": "^0.61.0"
   }
 }
