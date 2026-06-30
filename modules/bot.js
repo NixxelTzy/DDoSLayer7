@@ -15,7 +15,15 @@ let isAttackRunning = false;
 let workers = [];
 let attackTimeout;
 let displayInterval;
-let lastStatusText = '';
+let attackMessageInfo = null; // Stores { chatId, messageId, targetUrl, duration, startTime }
+
+function createProgressBar(current, total, length = 10) {
+    if (current > total) current = total;
+    const percentage = total > 0 ? current / total : 0;
+    const progress = Math.round(length * percentage);
+    const empty = length - progress;
+    return `[${'█'.repeat(progress)}${'·'.repeat(empty)}]`;
+}
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -71,15 +79,27 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     }
 
     isAttackRunning = true;
-    const sentMessage = await bot.sendMessage(chatId, '🚀 Mempersiapkan serangan...');
-    const statusMessageId = sentMessage.message_id;
+    const sentMessage = await bot.sendMessage(chatId, '🚀 Mempersiapkan serangan...', {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '🛑 Hentikan Serangan', callback_data: 'stop_attack' }]
+            ]
+        }
+    });
+
+    attackMessageInfo = {
+        chatId: chatId,
+        messageId: sentMessage.message_id,
+        targetUrl: targetUrl,
+        duration: duration,
+        startTime: Date.now()
+    };
 
     const combinedStats = {
         total: 0,
         success: 0,
         failed: 0,
-        phases: {},
-        startTime: Date.now()
+        phases: {}
     };
 
     const numCPUs = os.cpus().length; // Gunakan semua CPU yang tersedia (2 di Railway)
@@ -99,48 +119,64 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     }
 
     displayInterval = setInterval(() => {
-        const elapsedSeconds = Math.floor((Date.now() - combinedStats.startTime) / 1000);
+        if (!attackMessageInfo) return;
+        const elapsedSeconds = Math.floor((Date.now() - attackMessageInfo.startTime) / 1000);
         const rps = elapsedSeconds > 0 ? (combinedStats.total / elapsedSeconds).toFixed(0) : 0;
         const rate = combinedStats.total > 0 ? (combinedStats.success / combinedStats.total * 100).toFixed(2) : '0.00';
         const activePhases = [...new Set(Object.values(combinedStats.phases))].join(', ');
+        const progressBar = createProgressBar(elapsedSeconds, attackMessageInfo.duration, 10);
 
         const statusText = `🔥 *Serangan Berlangsung* 🔥
------------------------------------
-🎯 *Target:* \`${targetUrl}\`
-⏱️ *Waktu Berjalan:* ${elapsedSeconds} / ${duration} detik
------------------------------------
-*Mode Aktif:* ${activePhases || 'Initializing...'}
-*Requests/detik:* ~${rps}
-*Total Requests:* ${combinedStats.total}
-*Sukses:* ${combinedStats.success}
-*Gagal:* ${combinedStats.failed}
-*Tingkat Sukses:* ${rate}%`;
 
-        if (statusText !== lastStatusText) {
-            bot.editMessageText(statusText, {
-                chat_id: chatId,
-                message_id: statusMessageId,
-                parse_mode: 'Markdown'
-            }).catch(() => {}); // Abaikan error jika pesan tidak berubah
-            lastStatusText = statusText;
-        }
-    }, 1000); // Update setiap 1 detik untuk feedback yang lebih responsif
+🎯 *Target:* \`${attackMessageInfo.targetUrl}\`
+
+⏳ *Waktu:* ${progressBar} ${elapsedSeconds} / ${attackMessageInfo.duration} detik
+
+📈 *Statistik:*
+  - *Mode Aktif:* ${activePhases || 'Menginisialisasi...'}
+  - *Requests/detik:* ~${rps}
+  - *Total Requests:* ${combinedStats.total}
+  - *Sukses:* ${combinedStats.success}
+  - *Gagal:* ${combinedStats.failed}
+  - *Tingkat Sukses:* ${rate}%`;
+
+        bot.editMessageText(statusText, {
+            chat_id: attackMessageInfo.chatId,
+            message_id: attackMessageInfo.messageId,
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🛑 Hentikan Serangan', callback_data: 'stop_attack' }]
+                ]
+            }
+        }).catch(() => {}); // Abaikan error jika pesan tidak berubah atau terlalu sering diedit
+
+    }, 1500); // Update setiap 1.5 detik untuk menghindari rate limit Telegram
 
     // Atur timeout untuk menghentikan semua worker setelah durasi yang ditentukan
     attackTimeout = setTimeout(() => {
         clearInterval(displayInterval);
         const finalRate = (combinedStats.total > 0 ? (combinedStats.success / combinedStats.total * 100) : 0).toFixed(2);
         const finalStatusText = `✅ *Serangan Selesai* ✅
------------------------------------
-🎯 *Target:* \`${targetUrl}\`
-⏱️ *Total Durasi:* ${duration} detik
------------------------------------
-*Total Requests:* ${combinedStats.total}
-*Tingkat Sukses:* ${finalRate}%`;
-        bot.editMessageText(finalStatusText, { chat_id: chatId, message_id: statusMessageId, parse_mode: 'Markdown' }).catch(() => {});
+🎯 *Target:* \`${attackMessageInfo.targetUrl}\`
+⏱️ *Total Durasi:* ${attackMessageInfo.duration} detik
+
+📊 *Ringkasan Akhir:*
+  - *Total Requests:* ${combinedStats.total}
+  - *Tingkat Sukses:* ${finalRate}%`;
+
+        if (attackMessageInfo) {
+            bot.editMessageText(finalStatusText, { 
+                chat_id: attackMessageInfo.chatId, 
+                message_id: attackMessageInfo.messageId, 
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [] } // Hapus tombol setelah selesai
+            }).catch(() => {});
+        }
         workers.forEach(worker => worker.kill());
         workers = [];
         isAttackRunning = false;
+        attackMessageInfo = null;
     }, (duration + 2) * 1000); // Beri buffer 2 detik untuk laporan terakhir
 });
 
@@ -158,7 +194,25 @@ bot.onText(/\/stop/, (msg) => {
         workers.forEach(worker => worker.kill());
         workers = [];
         isAttackRunning = false;
-        bot.sendMessage(chatId, '🛑 Serangan telah dihentikan secara manual.');
+
+        const stopMessage = `🛑 *Serangan Dihentikan Manual* 🛑
+
+Serangan terhadap \`${attackMessageInfo.targetUrl}\` telah dihentikan secara paksa.`;
+
+        if (attackMessageInfo) {
+            bot.editMessageText(stopMessage, {
+                chat_id: attackMessageInfo.chatId,
+                message_id: attackMessageInfo.messageId,
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [] } // Hapus tombol saat dihentikan
+            }).catch(() => {
+                // Jika edit gagal (misal pesan terlalu lama), kirim pesan baru
+                bot.sendMessage(chatId, stopMessage, { parse_mode: 'Markdown' });
+            });
+        } else {
+            bot.sendMessage(chatId, '🛑 Serangan telah dihentikan secara manual.');
+        }
+        attackMessageInfo = null;
     } else {
         bot.sendMessage(chatId, 'ℹ️ Tidak ada serangan yang sedang berjalan.');
     }
@@ -167,10 +221,48 @@ bot.onText(/\/stop/, (msg) => {
 bot.on('callback_query', (callbackQuery) => {
     const msg = callbackQuery.message;
     const data = callbackQuery.data;
+    const chatId = msg.chat.id;
+    const fromId = callbackQuery.from.id;
 
     if (data === 'show_attack_usage') {
+        bot.answerCallbackQuery(callbackQuery.id);
         const usageMessage = "Untuk memulai serangan, gunakan format:\n`/attack <URL> <Durasi Detik>`\n\n*Contoh:*\n`/attack https://example.com 120`";
         bot.sendMessage(msg.chat.id, usageMessage, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    if (data === 'stop_attack') {
+        if (!AUTHORIZED_USER_IDS.includes(fromId)) {
+            bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Anda tidak diizinkan.', show_alert: true });
+            return;
+        }
+
+        if (isAttackRunning) {
+            bot.answerCallbackQuery(callbackQuery.id, { text: '🛑 Menghentikan serangan...' });
+
+            clearTimeout(attackTimeout);
+            clearInterval(displayInterval);
+            workers.forEach(worker => worker.kill());
+            workers = [];
+            isAttackRunning = false;
+
+            const stopMessage = `🛑 *Serangan Dihentikan Manual* 🛑\n\nSerangan terhadap \`${attackMessageInfo.targetUrl}\` telah dihentikan secara paksa.`;
+
+            if (attackMessageInfo) {
+                bot.editMessageText(stopMessage, {
+                    chat_id: attackMessageInfo.chatId,
+                    message_id: attackMessageInfo.messageId,
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [] } // Hapus tombol
+                }).catch(() => {});
+            }
+            attackMessageInfo = null;
+        } else {
+            bot.answerCallbackQuery(callbackQuery.id, { text: 'ℹ️ Tidak ada serangan yang berjalan.' });
+            // Hapus tombol jika masih ada
+            bot.editMessageText(msg.text, { chat_id: chatId, message_id: msg.message_id, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }).catch(()=>{});
+        }
+        return;
     }
 });
 
