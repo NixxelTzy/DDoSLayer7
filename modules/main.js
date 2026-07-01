@@ -259,8 +259,12 @@ class NuclearFlood {
                 throwHttpErrors: false,
             });
             stream.on('request', (req) => {
-                req.destroy();
-                this.stats.success++;
+                try {
+                    req.destroy();
+                    this.stats.success++;
+                } catch (e) {
+                    this.stats.failed++;
+                }
             });
             stream.on('error', (error) => {
                 if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
