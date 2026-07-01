@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
-    "request": "^2.88.2"
+    "got": "^11.8.6",
+    "tough-cookie": "^4.1.4"
   },
   "author": "",
   "license": "ISC"

