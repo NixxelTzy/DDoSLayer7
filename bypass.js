@@ -135,7 +135,10 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
             attack();
         }
 
-        setImmediate(attackLoop);
+        // Gunakan setTimeout dengan delay kecil untuk mencegah event loop blocking.
+        // Ini memastikan bahwa timer lain (seperti statsInterval) mendapat kesempatan untuk berjalan,
+        // sehingga laporan menjadi lebih akurat dan real-time.
+        setTimeout(attackLoop, 1);
     };
 
     // Lapor statistik secara berkala setiap 5 detik

