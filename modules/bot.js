@@ -16,6 +16,7 @@ let workers = [];
 let attackTimeout;
 let displayInterval;
 let attackMessageInfo = null; // Stores { chatId, messageId, targetUrl, duration, startTime }
+let lastWorkerError = null;
 
 function createProgressBar(current, total, length = 10) {
     if (current > total) current = total;
@@ -85,6 +86,7 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     }
 
     isAttackRunning = true;
+    lastWorkerError = null; // Reset any previous error
     const sentMessage = await bot.sendMessage(chatId, '🚀 Mempersiapkan serangan...', {
         reply_markup: {
             inline_keyboard: [
@@ -119,7 +121,13 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
             workers = [];
             isAttackRunning = false;
 
-            const errorMessage = `❌ *Serangan Gagal Dimulai*\n\nTerjadi error internal pada proses pekerja. Serangan dihentikan.`;
+            let errorMessage = `❌ *Serangan Gagal Dimulai*\n\nTerjadi error internal pada proses pekerja. Serangan dihentikan.`;
+            if (lastWorkerError) {
+                // Truncate if too long for a telegram message (max 4096 chars)
+                const truncatedError = lastWorkerError.substring(0, 3500);
+                errorMessage += `\n\n*Log Error Lengkap:*\n\`\`\`\n${truncatedError}\n\`\`\``;
+            }
+
             if (attackMessageInfo) {
                 bot.editMessageText(errorMessage, {
                     chat_id: attackMessageInfo.chatId,
@@ -129,6 +137,7 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
                 }).catch(() => {}); // Ignore errors, we are in a failed state anyway
             }
             attackMessageInfo = null;
+            lastWorkerError = null;
         }
     };
 
@@ -143,6 +152,9 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
                 combinedStats.success += message.data.success;
                 combinedStats.failed += message.data.failed;
                 combinedStats.phases[worker.pid] = message.data.phase;
+            } else if (message.type === 'error') {
+                // Store the last error message from any worker
+                lastWorkerError = message.data;
             }
         });
         worker.on('exit', (code) => handleWorkerExit(worker.pid, code));

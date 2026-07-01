@@ -5,6 +5,30 @@ const { URL } = require('url');
 const got = require('got');
 const crypto = require('crypto');
 
+process.on('uncaughtException', (err, origin) => {
+    const errorMessage = `FATAL: Uncaught Exception\nOrigin: ${origin}\nError: ${err.stack || err}`;
+    console.error(errorMessage);
+    try {
+        if (process.send) {
+            process.send({ type: 'error', data: errorMessage });
+        }
+    } finally {
+        process.exit(1);
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    const errorMessage = `FATAL: Unhandled Rejection\nReason: ${reason.stack || reason}`;
+    console.error(errorMessage);
+    try {
+        if (process.send) {
+            process.send({ type: 'error', data: errorMessage });
+        }
+    } finally {
+        process.exit(1);
+    }
+});
+
 const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
