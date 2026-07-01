@@ -492,7 +492,7 @@ class L7Flood {
         this.threadCount = threadCount;
         this.delay = delay;
         this.stats = stats;
-        this._running = false;
+        this.running = false;
         this.bypasser = bypasser;
         this.largePayload = largePayload;
         try {
