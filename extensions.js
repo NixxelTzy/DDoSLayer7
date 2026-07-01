@@ -46,6 +46,43 @@ const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const accept_encoding_pool = ['gzip, deflate, br, zstd', 'gzip, deflate, br', 'gzip, deflate'];
 
+function getAxiosOptions(proxyString) {
+    const persona = randomChoice(browserPersonas);
+    const headers = {
+        'User-Agent': persona.ua,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Encoding': randomChoice(accept_encoding_pool),
+        'Accept-Language': generateRealisticAcceptLanguage(),
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Upgrade-Insecure-Requests': '1',
+    };
+
+    if (persona.sec_ch_ua) {
+        headers['sec-ch-ua'] = persona.sec_ch_ua;
+        headers['sec-ch-ua-mobile'] = '?0';
+        headers['sec-ch-ua-platform'] = persona.platform;
+    }
+
+    const options = {
+        headers: headers,
+        timeout: 15000,
+    };
+
+    if (proxyString) {
+        const proxyUrl = new URL(proxyString);
+        options.proxy = {
+            protocol: proxyUrl.protocol.replace(':', ''),
+            host: proxyUrl.hostname,
+            port: parseInt(proxyUrl.port, 10),
+        };
+        if (proxyUrl.username && proxyUrl.password) {
+            options.proxy.auth = { username: proxyUrl.username, password: proxyUrl.password };
+        }
+    }
+    return options;
+}
+
 function generateRealisticAcceptLanguage() {
     const languages = [
         { code: 'en-US', q: 1.0 }, { code: 'en', q: 0.9 },
@@ -118,5 +155,6 @@ const getRandomPayload = () => {
 module.exports = {
     proxyList,
     browserPersonas,
-    getRandomPayload
+    getRandomPayload,
+    getAxiosOptions
 };
