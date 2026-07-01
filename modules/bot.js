@@ -27,20 +27,22 @@ function createProgressBar(current, total, length = 10) {
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    const welcomeMessage = `
-Selamat datang di Bot Serangan! 🚀
+    const welcomeMessage = `*Selamat Datang di Zenn DDoS Bot!* 🚀
 
-Bot ini dapat melakukan beberapa jenis serangan Layer 7. Gunakan dengan bijak.
+Bot ini dirancang untuk melakukan serangan *Layer 7* dengan metode *NuclearFlood*.
 
-Klik tombol di bawah untuk melihat cara menggunakan perintah serangan.
-    `;
+⚠️ *Peringatan:*
+Gunakan bot ini dengan tanggung jawab penuh. Penyalahgunaan untuk aktivitas ilegal adalah di luar tanggung jawab pengembang.
+
+👇 Klik tombol di bawah untuk memulai.`;
 
     const opts = {
         reply_markup: {
             inline_keyboard: [
-                [{ text: '⚡ Attack', callback_data: 'show_attack_usage' }]
+                [{ text: '⚡ Cara Penggunaan', callback_data: 'show_attack_usage' }]
             ]
-        }
+        },
+        parse_mode: 'Markdown'
     };
     bot.sendMessage(chatId, welcomeMessage, opts);
 });
@@ -51,30 +53,34 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     const duration = parseInt(match[2], 10);
 
     if (!AUTHORIZED_USER_IDS.includes(msg.from.id)) {
-        bot.sendMessage(chatId, '❌ Anda tidak diizinkan menggunakan perintah ini.');
+        const unauthorizedMessage = `🚫 *Akses Ditolak*\n\nAnda tidak memiliki izin untuk menggunakan perintah ini.`;
+        bot.sendMessage(chatId, unauthorizedMessage, { parse_mode: 'Markdown' });
         return;
     }
 
     if (!targetUrl || !duration) {
-        const usageMessage = "Format perintah salah.\n\n*Contoh Penggunaan:*\n`/attack https://example.com 120`";
+        const usageMessage = `⚠️ *Format Perintah Salah*\n\nGunakan format berikut:\n\`/attack <URL> <Durasi>\`\n\n*Contoh:*\n\`/attack https://example.com 120\``;
         bot.sendMessage(chatId, usageMessage, { parse_mode: 'Markdown' });
         return;
     }
 
     if (isAttackRunning) {
-        bot.sendMessage(chatId, '❌ Serangan lain sedang berjalan. Harap tunggu hingga selesai.');
+        const busyMessage = `⏳ *Serangan Sedang Berjalan*\n\nHarap tunggu hingga serangan saat ini selesai sebelum memulai yang baru. Anda dapat menghentikannya dengan tombol atau perintah /stop.`;
+        bot.sendMessage(chatId, busyMessage, { parse_mode: 'Markdown' });
         return;
     }
 
     try {
         new URL(targetUrl);
     } catch (e) {
-        bot.sendMessage(chatId, '❌ URL target tidak valid.');
+        const invalidUrlMessage = `❌ *URL Tidak Valid*\n\nURL yang Anda masukkan tidak valid. Pastikan formatnya benar, contohnya: \`https://example.com\``;
+        bot.sendMessage(chatId, invalidUrlMessage, { parse_mode: 'Markdown' });
         return;
     }
 
     if (isNaN(duration) || duration <= 0) {
-        bot.sendMessage(chatId, '❌ Durasi harus berupa angka positif.');
+        const invalidDurationMessage = `❌ *Durasi Tidak Valid*\n\nDurasi serangan harus berupa angka positif dalam satuan detik.`;
+        bot.sendMessage(chatId, invalidDurationMessage, { parse_mode: 'Markdown' });
         return;
     }
 
@@ -184,7 +190,8 @@ bot.onText(/\/stop/, (msg) => {
     const chatId = msg.chat.id;
 
     if (!AUTHORIZED_USER_IDS.includes(msg.from.id)) {
-        bot.sendMessage(chatId, '❌ Anda tidak diizinkan menggunakan perintah ini.');
+        const unauthorizedMessage = `🚫 *Akses Ditolak*\n\nAnda tidak memiliki izin untuk menggunakan perintah ini.`;
+        bot.sendMessage(chatId, unauthorizedMessage, { parse_mode: 'Markdown' });
         return;
     }
 
@@ -214,7 +221,8 @@ Serangan terhadap \`${attackMessageInfo.targetUrl}\` telah dihentikan secara pak
         }
         attackMessageInfo = null;
     } else {
-        bot.sendMessage(chatId, 'ℹ️ Tidak ada serangan yang sedang berjalan.');
+        const noAttackMessage = `ℹ️ *Tidak Ada Serangan Aktif*\n\nSaat ini tidak ada serangan yang sedang berjalan.`;
+        bot.sendMessage(chatId, noAttackMessage, { parse_mode: 'Markdown' });
     }
 });
 
@@ -226,14 +234,14 @@ bot.on('callback_query', (callbackQuery) => {
 
     if (data === 'show_attack_usage') {
         bot.answerCallbackQuery(callbackQuery.id);
-        const usageMessage = "Untuk memulai serangan, gunakan format:\n`/attack <URL> <Durasi Detik>`\n\n*Contoh:*\n`/attack https://example.com 120`";
+        const usageMessage = `*Cara Menggunakan Perintah Serangan* ⚡\n\nGunakan format berikut di chat:\n\`/attack <URL> <Durasi>\`\n\n*Contoh:*\n\`/attack https://example.com 120\`\n\n- \`<URL>\`: Alamat situs web target.\n- \`<Durasi>\`: Lama serangan dalam detik.`;
         bot.sendMessage(msg.chat.id, usageMessage, { parse_mode: 'Markdown' });
         return;
     }
 
     if (data === 'stop_attack') {
         if (!AUTHORIZED_USER_IDS.includes(fromId)) {
-            bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Anda tidak diizinkan.', show_alert: true });
+            bot.answerCallbackQuery(callbackQuery.id, { text: '🚫 Akses Ditolak', show_alert: true });
             return;
         }
 
@@ -258,7 +266,7 @@ bot.on('callback_query', (callbackQuery) => {
             }
             attackMessageInfo = null;
         } else {
-            bot.answerCallbackQuery(callbackQuery.id, { text: 'ℹ️ Tidak ada serangan yang berjalan.' });
+            bot.answerCallbackQuery(callbackQuery.id, { text: 'ℹ️ Tidak ada serangan aktif untuk dihentikan.' });
             // Hapus tombol jika masih ada
             bot.editMessageText(msg.text, { chat_id: chatId, message_id: msg.message_id, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }).catch(()=>{});
         }

