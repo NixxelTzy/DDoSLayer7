@@ -750,19 +750,22 @@ process.on('message', async ({ targetUrl, duration }) => {
     // untuk mencegah kelambatan pada sistem monitoring.
     const STATS_INTERVAL = 2000; // Kirim data setiap 2 detik untuk mengurangi beban
     let statsTimeout;
+    let initialReportSent = false; // Flag to ensure the first report is sent to update the 'phase'
 
     const sendStats = () => {
-        if (stats.total > 0 || stats.success > 0 || stats.failed > 0) {
+        // Kirim statistik jika ada data baru, ATAU jika ini laporan pertama (untuk menginisialisasi UI bot)
+        if (!initialReportSent || stats.total > 0 || stats.success > 0 || stats.failed > 0) {
             try {
                 if (process.send) { // Pastikan proses induk masih ada
                     process.send({ type: 'stats', data: { ...stats } });
+                    initialReportSent = true; // Tandai bahwa laporan awal telah dikirim
                 }
             } catch (e) {
                 // Proses induk mungkin terputus, hentikan pengiriman statistik
                 if (statsTimeout) clearTimeout(statsTimeout);
                 return;
             }
-            // Reset penghitung setelah berhasil mengirim
+            // Reset penghitung setelah mengirim
             stats.total = 0;
             stats.success = 0;
             stats.failed = 0;
