@@ -259,6 +259,11 @@ class NuclearFlood {
                 throwHttpErrors: false,
             });
             stream.on('request', (req) => {
+                // IMPORTANT: Add a no-op error handler to the underlying request.
+                // Destroying a request can emit an 'error' event. Without a listener,
+                // this would crash the entire worker process.
+                req.on('error', () => {});
+
                 try {
                     req.destroy();
                     this.stats.success++;
