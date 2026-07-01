@@ -8,24 +8,30 @@ const crypto = require('crypto');
 process.on('uncaughtException', (err, origin) => {
     const errorMessage = `FATAL: Uncaught Exception\nOrigin: ${origin}\nError: ${err.stack || err}`;
     console.error(errorMessage);
-    try {
-        if (process.send) {
-            process.send({ type: 'error', data: errorMessage });
-        }
-    } finally {
-        process.exit(1);
+    if (process.send) {
+        // Send the error message and exit once it's sent.
+        process.send({ type: 'error', data: errorMessage }, () => {
+            process.exit(1);
+        });
+        // Add a timeout in case sending hangs, to ensure the process eventually exits.
+        setTimeout(() => process.exit(1), 1000);
+    } else {
+        process.exit(1); // Exit if not a child process
     }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
     const errorMessage = `FATAL: Unhandled Rejection\nReason: ${reason.stack || reason}`;
     console.error(errorMessage);
-    try {
-        if (process.send) {
-            process.send({ type: 'error', data: errorMessage });
-        }
-    } finally {
-        process.exit(1);
+    if (process.send) {
+        // Send the error message and exit once it's sent.
+        process.send({ type: 'error', data: errorMessage }, () => {
+            process.exit(1);
+        });
+        // Add a timeout in case sending hangs, to ensure the process eventually exits.
+        setTimeout(() => process.exit(1), 1000);
+    } else {
+        process.exit(1); // Exit if not a child process
     }
 });
 
