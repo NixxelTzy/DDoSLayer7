@@ -108,6 +108,30 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
         phases: {}
     };
 
+    const handleWorkerExit = (pid, code) => {
+        // If a worker exits with an error code while the attack is supposed to be running
+        if (code !== 0 && isAttackRunning) {
+            console.error(`[Bot] Worker PID ${pid} crashed with exit code ${code}. Stopping all workers.`);
+            // Stop any remaining workers and cleanup intervals
+            clearTimeout(attackTimeout);
+            clearInterval(displayInterval);
+            workers.forEach(w => w.kill());
+            workers = [];
+            isAttackRunning = false;
+
+            const errorMessage = `❌ *Serangan Gagal Dimulai*\n\nTerjadi error internal pada proses pekerja. Serangan dihentikan.`;
+            if (attackMessageInfo) {
+                bot.editMessageText(errorMessage, {
+                    chat_id: attackMessageInfo.chatId,
+                    message_id: attackMessageInfo.messageId,
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [] }
+                }).catch(() => {}); // Ignore errors, we are in a failed state anyway
+            }
+            attackMessageInfo = null;
+        }
+    };
+
     const numCPUs = os.cpus().length; // Gunakan semua CPU yang tersedia (2 di Railway)
 
     for (let i = 0; i < numCPUs; i++) {
@@ -121,6 +145,7 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
                 combinedStats.phases[worker.pid] = message.data.phase;
             }
         });
+        worker.on('exit', (code) => handleWorkerExit(worker.pid, code));
         workers.push(worker);
     }
 
