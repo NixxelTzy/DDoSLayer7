@@ -10,8 +10,7 @@
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
-    "tls-client": "^1.1.1",
-    "tough-cookie": "^4.1.4",
+    "@apify/got-scraping": "^2.0.2",
     "http-proxy": "^1.18.1"
   },
   "author": "",

