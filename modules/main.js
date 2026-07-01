@@ -48,6 +48,23 @@ function generateRandomString(length) {
     return result;
 }
 
+/**
+ * Wraps a promise with a timeout.
+ * @param {Promise} promise The promise to wrap.
+ * @param {number} ms The timeout in milliseconds.
+ * @returns {Promise} A new promise that rejects if the original promise doesn't resolve/reject within `ms`.
+ */
+const withTimeout = (promise, ms) => {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(`Promise timed out after ${ms} ms`));
+        }, ms);
+
+        promise.then(res => { clearTimeout(timeoutId); resolve(res); })
+               .catch(err => { clearTimeout(timeoutId); reject(err); });
+    });
+};
+
 class BypassGenerator {
     constructor() {
         this.browserProfiles = [
@@ -714,8 +731,17 @@ process.on('message', async ({ targetUrl, duration }) => {
     const bypasser = new BypassGenerator();
 
     // --- "AI" Path Discovery Phase ---
-    const pathFinder = new PathFinder(targetUrl);
-    const discoveredAttackPaths = await pathFinder.discover();
+    let discoveredAttackPaths;
+    try {
+        console.log("Starting Path Discovery (max 10s)...");
+        const pathFinder = new PathFinder(targetUrl);
+        // If discovery takes more than 10s, it will time out.
+        discoveredAttackPaths = await withTimeout(pathFinder.discover(), 10000);
+        console.log(`Path Discovery finished. Found ${discoveredAttackPaths.length} paths.`);
+    } catch (error) {
+        console.error(`Path Discovery failed or timed out: ${error.message}. Proceeding with base URL only.`);
+        discoveredAttackPaths = [targetUrl]; // Fallback to the original URL
+    }
 
     const stats = { total: 0, success: 0, failed: 0, phase: 'Combined Attack' };
 
