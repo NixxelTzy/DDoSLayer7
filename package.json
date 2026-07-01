@@ -1,18 +1,14 @@
 {
-  "name": "rudy-attack-tool",
+  "name": "telegram-attack-bot",
   "version": "1.0.0",
-  "description": "A simple Rudy (Are You Dead Yet?) attack tool for educational purposes.",
-  "main": "modules/main.js",
+  "description": "Bot Telegram untuk menjalankan tugas.",
+  "main": "bot.js",
   "scripts": {
-    "start": "node modules/server.js"
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
   },
   "author": "",
-  "license": "ISC",
-  "engines": { "node": ">=12.0.0" },
-  "dependencies": {
-    "chalk": "^4.1.2",
-    "inquirer": "^8.2.4",
-    "node-telegram-bot-api": "^0.61.0",
-    "got": "^11.8.5"
-  }
+  "license": "ISC"
 }
