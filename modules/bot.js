@@ -113,31 +113,40 @@ bot.onText(/\/attack(?: (.+) (\d+))?/, async (msg, match) => {
     const handleWorkerExit = (pid, code) => {
         // If a worker exits with an error code while the attack is supposed to be running
         if (code !== 0 && isAttackRunning) {
-            console.error(`[Bot] Worker PID ${pid} crashed with exit code ${code}. Stopping all workers.`);
-            // Stop any remaining workers and cleanup intervals
-            clearTimeout(attackTimeout);
-            clearInterval(displayInterval);
-            workers.forEach(w => w.kill());
-            workers = [];
-            isAttackRunning = false;
+            // Use a small delay to ensure any final error messages from the worker are processed
+            // before we declare the attack as failed. This helps prevent a race condition
+            // where the 'exit' event is handled before the 'message' event.
+            setTimeout(() => {
+                // Check again if the attack is still considered running, in case it was stopped
+                // by another mechanism in the meantime.
+                if (!isAttackRunning) return;
 
-            let errorMessage = `❌ *Serangan Gagal Dimulai*\n\nTerjadi error internal pada proses pekerja. Serangan dihentikan.`;
-            if (lastWorkerError) {
-                // Truncate if too long for a telegram message (max 4096 chars)
-                const truncatedError = lastWorkerError.substring(0, 3500);
-                errorMessage += `\n\n*Log Error Lengkap:*\n\`\`\`\n${truncatedError}\n\`\`\``;
-            }
+                console.error(`[Bot] Worker PID ${pid} crashed with exit code ${code}. Stopping all workers.`);
+                // Stop any remaining workers and cleanup intervals
+                clearTimeout(attackTimeout);
+                clearInterval(displayInterval);
+                workers.forEach(w => w.kill());
+                workers = [];
+                isAttackRunning = false;
 
-            if (attackMessageInfo) {
-                bot.editMessageText(errorMessage, {
-                    chat_id: attackMessageInfo.chatId,
-                    message_id: attackMessageInfo.messageId,
-                    parse_mode: 'Markdown',
-                    reply_markup: { inline_keyboard: [] }
-                }).catch(() => {}); // Ignore errors, we are in a failed state anyway
-            }
-            attackMessageInfo = null;
-            lastWorkerError = null;
+                let errorMessage = `❌ *Serangan Gagal Dimulai*\n\nTerjadi error internal pada proses pekerja. Serangan dihentikan.`;
+                if (lastWorkerError) {
+                    // Truncate if too long for a telegram message (max 4096 chars)
+                    const truncatedError = lastWorkerError.substring(0, 3500);
+                    errorMessage += `\n\n*Log Error Lengkap:*\n\`\`\`\n${truncatedError}\n\`\`\``;
+                }
+
+                if (attackMessageInfo) {
+                    bot.editMessageText(errorMessage, {
+                        chat_id: attackMessageInfo.chatId,
+                        message_id: attackMessageInfo.messageId,
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [] }
+                    }).catch(() => {}); // Ignore errors, we are in a failed state anyway
+                }
+                attackMessageInfo = null;
+                lastWorkerError = null;
+            }, 200); // 200ms delay should be sufficient
         }
     };
 
