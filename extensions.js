@@ -27,7 +27,18 @@ const browserPersonas = [
         id: 'chrome_120',
         ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         sec_ch_ua: '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        platform: '"macOS"'
+        platform: '"macOS"',
+    },
+    {
+        id: 'edge_124',
+        ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.2478.80',
+        sec_ch_ua: '"Chromium";v="124", "Microsoft Edge";v="124", "Not-A.Brand";v="99"',
+        platform: '"Windows"',
+    },
+    {
+        id: 'firefox_125_mac',
+        ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0',
+        // Firefox on Mac
     }
 ];
 
@@ -39,36 +50,95 @@ const referers = [
     "https://duckduckgo.com/",
     "https://www.instagram.com/",
     "https://www.twitter.com/",
+    "https://t.co/",
+    "https://www.reddit.com/",
+    "https://www.linkedin.com/",
 ];
 
 // Helper untuk memilih item acak dari array
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const accept_encoding_pool = ['gzip, deflate, br, zstd', 'gzip, deflate, br', 'gzip, deflate'];
+const sec_fetch_dest_pool = ['document', 'empty', 'script', 'style', 'image', 'font'];
+const device_memory_pool = ['1', '2', '4', '8'];
+const viewport_width_pool = ['1920', '1680', '1440', '1366', '2560'];
 
-function getAxiosOptions(proxyString) {
+function getDynamicAcceptHeader(fetchDest) {
+    switch (fetchDest) {
+        case 'document':
+        case 'iframe':
+            return 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7';
+        case 'script':
+        case 'style':
+        case 'font':
+            return '*/*';
+        case 'image':
+            return 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8';
+        case 'empty': // Typically for fetch/XHR
+            return 'application/json, text/plain, */*';
+        default:
+            return '*/*';
+    }
+}
+
+function getAxiosOptions(target, proxyString, signal) {
     const persona = randomChoice(browserPersonas);
+    const fetchDest = randomChoice(sec_fetch_dest_pool);
+
     const headers = {
         'User-Agent': persona.ua,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept': getDynamicAcceptHeader(fetchDest),
         'Accept-Encoding': randomChoice(accept_encoding_pool),
         'Accept-Language': generateRealisticAcceptLanguage(),
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
         'Upgrade-Insecure-Requests': '1',
+        'Connection': 'keep-alive',
+        // Header sidik jari perangkat
+        'Device-Memory': randomChoice(device_memory_pool),
+        'Viewport-Width': randomChoice(viewport_width_pool),
+        // Header Sec-Fetch untuk konteks
+        'Sec-Fetch-Dest': fetchDest,
+        'Sec-Fetch-User': '?1',
+        // Header Spoofing & Bypass
+        'X-Forwarded-For': `${crypto.randomInt(1, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(1, 255)}`,
+        'X-Forwarded-Proto': 'https',
     };
 
+    // Tambahkan header Client-Hints jika persona mendukungnya
     if (persona.sec_ch_ua) {
         headers['sec-ch-ua'] = persona.sec_ch_ua;
         headers['sec-ch-ua-mobile'] = '?0';
         headers['sec-ch-ua-platform'] = persona.platform;
     }
 
+    // Atur Sec-Fetch-Site, Mode, dan Referer secara dinamis
+    const siteChoice = Math.random();
+    if (siteChoice < 0.5) { // 50% - Navigasi dari luar
+        headers['Sec-Fetch-Site'] = 'none';
+        headers['Sec-Fetch-Mode'] = 'navigate';
+    } else if (siteChoice < 0.8) { // 30% - Request dari halaman yang sama
+        headers['Sec-Fetch-Site'] = 'same-origin';
+        headers['Sec-Fetch-Mode'] = 'cors';
+        headers['Referer'] = `${target.protocol}//${target.host}/${crypto.randomBytes(4).toString('hex')}`;
+    } else { // 20% - Request dari situs lain
+        headers['Sec-Fetch-Site'] = 'cross-site';
+        headers['Sec-Fetch-Mode'] = 'cors';
+        headers['Referer'] = randomChoice(referers);
+    }
+
+    // Simulasikan request AJAX
+    if (fetchDest === 'empty') {
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+    }
+
     const options = {
         headers: headers,
         timeout: 15000,
+        signal: signal,
     };
 
+    // Konfigurasi proxy untuk Axios
     if (proxyString) {
         const proxyUrl = new URL(proxyString);
         options.proxy = {
