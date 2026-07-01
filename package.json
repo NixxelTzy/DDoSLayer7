@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
-    "header-generator": "^2.2.3",
     "tls-client-ng": "^2.1.0",
     "tough-cookie": "^4.1.4",
     "http-proxy": "^1.18.1"

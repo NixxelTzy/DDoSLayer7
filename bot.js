@@ -139,8 +139,9 @@ bot.on('message', async (msg) => {
 *Target:* \`${url}\`
 *Durasi Sisa:* \`${stats.secondsRemaining} detik\`
 -----------------------------------
-*Requests Terkirim:* \`${stats.totalSent.toLocaleString()}\`
-*Requests Error:* \`${stats.totalError.toLocaleString()}\`
+*Requests/detik (RPS):* \`${stats.rps.toLocaleString()}\`
+*Total Requests:* \`${stats.totalSent.toLocaleString()}\`
+*Total Error:* \`${stats.totalError.toLocaleString()}\`
 *Success Rate:* \`${stats.successRate} %\`
             `;
 
