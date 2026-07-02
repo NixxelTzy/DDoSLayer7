@@ -185,7 +185,8 @@ function getAxiosOptions(target, proxyString, signal) {
         headers: headers,
         timeout: 8000,
         signal: signal,
-        validateStatus: (status) => status < 500 && status !== 429,
+        // Hanya anggap kode status 2xx sebagai sukses. Semua yang lain akan dianggap error.
+        validateStatus: (status) => status >= 200 && status < 300,
         httpsAgent: httpsAgent,
     };
 
