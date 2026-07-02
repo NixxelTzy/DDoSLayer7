@@ -148,8 +148,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         localSent++;
 
         const finalUrl = fuzzUrl(targetUrl);
-        const proxyUrl = proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined;
-        const options = getAxiosOptions(target, proxyUrl, controller.signal);
+        const options = getAxiosOptions(target, controller.signal);
 
         const onComplete = () => {
             activeRequests--;

@@ -78,7 +78,7 @@ function getDynamicAcceptHeader(fetchDest) {
     }
 }
 
-function getAxiosOptions(target, proxyString, signal) {
+function getAxiosOptions(target, signal) {
     const persona = randomChoice(browserPersonas);
     const fetchDest = randomChoice(sec_fetch_dest_pool);
 
@@ -174,11 +174,15 @@ function getAxiosOptions(target, proxyString, signal) {
     const headers = Object.fromEntries(headersArray.filter(h => h[1] !== null).sort(() => Math.random() - 0.5));
 
     const httpsAgent = new https.Agent({
+        keepAlive: true,
+        maxSockets: 250,
+        maxFreeSockets: 20,
+        timeout: 30000, // Keep-alive timeout
         ciphers: randomChoice(cipher_suites_pool),
         honorCipherOrder: true,
         minVersion: 'TLSv1.2',
         maxVersion: 'TLSv1.3',
-        rejectUnauthorized: false
+        rejectUnauthorized: false // Important for self-signed certs or some proxy setups
     });
 
     const options = {
@@ -190,17 +194,6 @@ function getAxiosOptions(target, proxyString, signal) {
         httpsAgent: httpsAgent,
     };
 
-    if (proxyString) {
-        const proxyUrl = new URL(proxyString);
-        options.proxy = {
-            protocol: proxyUrl.protocol.replace(':', ''),
-            host: proxyUrl.hostname,
-            port: parseInt(proxyUrl.port, 10),
-        };
-        if (proxyUrl.username && proxyUrl.password) {
-            options.proxy.auth = { username: proxyUrl.username, password: proxyUrl.password };
-        }
-    }
     return options;
 }
 

