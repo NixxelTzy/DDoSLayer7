@@ -11,31 +11,6 @@ const activeTest = {};
 
 console.log("Bot is running... Send /start to your bot in Telegram.");
 
-// Perintah /start
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const text = "Selamat datang! Bot ini siap untuk melakukan uji beban (load test).\n\nKlik tombol di bawah untuk memulai.";
-  bot.sendMessage(chatId, text, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🚀 Mulai Serangan', callback_data: 'start_test' }]
-      ]
-    }
-  });
-});
-
-// Perintah /stop
-bot.onText(/\/stop/, (msg) => {
-  const chatId = msg.chat.id;
-  if (activeTest[chatId]) {
-    stopTest(); // Panggil fungsi untuk menghentikan tes
-    bot.sendMessage(chatId, "🛑 Sinyal berhenti telah dikirim. Tes akan berhenti setelah batch saat ini selesai.");
-    delete activeTest[chatId];
-  } else {
-    bot.sendMessage(chatId, "Tidak ada tes yang sedang berjalan.");
-  }
-});
-
 // Handler untuk tombol inline
 bot.on('callback_query', (callbackQuery) => {
   const msg = callbackQuery.message;
@@ -52,14 +27,44 @@ bot.on('callback_query', (callbackQuery) => {
   }
 });
 
-// Handler untuk pesan dari pengguna (untuk mendapatkan target)
+// Handler untuk semua pesan teks dari pengguna
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
-  if (msg.text.startsWith('/') || userState[chatId] !== 'awaiting_target') {
+  const text = msg.text;
+
+  // Abaikan jika bukan pesan teks (misal: stiker, foto)
+  if (!text) {
     return;
   }
 
-  const parts = msg.text.split(/\s+/);
+  // Router untuk perintah
+  if (text.startsWith('/start')) {
+    const welcomeText = "Selamat datang! Bot ini siap untuk melakukan uji beban (load test).\n\nKlik tombol di bawah untuk memulai.";
+    bot.sendMessage(chatId, welcomeText, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🚀 Mulai Serangan', callback_data: 'start_test' }]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (text.startsWith('/stop')) {
+    if (activeTest[chatId]) {
+      stopTest(); // Panggil fungsi untuk menghentikan tes
+      bot.sendMessage(chatId, "🛑 Sinyal berhenti telah dikirim. Tes akan berhenti setelah batch saat ini selesai.");
+      delete activeTest[chatId];
+    } else {
+      bot.sendMessage(chatId, "Tidak ada tes yang sedang berjalan.");
+    }
+    return;
+  }
+
+  // Jika bot tidak sedang menunggu input target, abaikan pesan lain.
+  if (userState[chatId] !== 'awaiting_target') return;
+
+  const parts = text.split(/\s+/);
   if (parts.length !== 2) {
     bot.sendMessage(chatId, "Format salah. Gunakan: `URL DURASI`\nContoh: `https://example.com 60`", { parse_mode: 'Markdown' });
     return;
