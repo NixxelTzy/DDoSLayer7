@@ -5,13 +5,15 @@ const token = "8962044822:AAGNjh-qyQQsFY6SitarRFMzr5DepQOCNmY";
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Objek untuk melacak status pengguna dan tes yang aktif
 const userState = {};
 const activeTest = {};
 
 console.log("Bot is running... Send /start to your bot in Telegram.");
 
-// Handler untuk tombol inline
+bot.on('polling_error', (error) => {
+  console.error(`[Polling Error]: Bot berhenti karena masalah koneksi. Pesan: ${error.message}`);
+});
+
 bot.on('callback_query', (callbackQuery) => {
   const msg = callbackQuery.message;
   const chatId = msg.chat.id;
@@ -27,17 +29,14 @@ bot.on('callback_query', (callbackQuery) => {
   }
 });
 
-// Handler untuk semua pesan teks dari pengguna
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  // Abaikan jika bukan pesan teks (misal: stiker, foto)
   if (!text) {
     return;
   }
 
-  // Router untuk perintah
   if (text.startsWith('/start')) {
     const welcomeText = "Selamat datang! Bot ini siap untuk melakukan uji beban (load test).\n\nKlik tombol di bawah untuk memulai.";
     bot.sendMessage(chatId, welcomeText, {
@@ -52,7 +51,7 @@ bot.on('message', async (msg) => {
 
   if (text.startsWith('/stop')) {
     if (activeTest[chatId]) {
-      stopTest(); // Panggil fungsi untuk menghentikan tes
+      stopTest();
       bot.sendMessage(chatId, "🛑 Sinyal berhenti telah dikirim. Tes akan berhenti setelah batch saat ini selesai.");
       delete activeTest[chatId];
     } else {
@@ -61,7 +60,6 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Jika bot tidak sedang menunggu input target, abaikan pesan lain.
   if (userState[chatId] !== 'awaiting_target') return;
 
   const parts = text.split(/\s+/);
@@ -80,7 +78,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  if (isNaN(duration) || duration <= 0 || duration > 600) { // Batasi durasi maks 10 menit
+  if (isNaN(duration) || duration <= 0 || duration > 600) {
     bot.sendMessage(chatId, "Durasi tidak valid. Masukkan angka antara 1 dan 600 detik.");
     return;
   }
@@ -102,7 +100,7 @@ bot.on('message', async (msg) => {
 Kirim /stop untuk menghentikan paksa.`;
     try {
       await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown' });
-    } catch (e) { /* Abaikan error "message is not modified" */ }
+    } catch (e) { }
   };
 
   const onComplete = async (results) => {
@@ -116,8 +114,14 @@ Kirim /stop untuk menghentikan paksa.`;
 *Gagal:* ${results.errorCount}
 *RPS (Rata-rata):* ${results.rps}
 --------------------------------------`;
-    await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown' });
-    delete activeTest[chatId];
+    try {
+      await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown' });
+    } catch (e) {
+      console.error("Gagal mengedit pesan laporan akhir:", e.message);
+      bot.sendMessage(chatId, text, { parse_mode: 'Markdown' }).catch(console.error);
+    } finally {
+      delete activeTest[chatId];
+    }
   };
 
   runTest({ targetUrl, duration, concurrency: 100, onProgress, onComplete });
