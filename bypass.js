@@ -158,19 +158,28 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
             if (axios.isCancel(error)) {
                 return;
             }
+            localError++; // Count every error
 
-            if (error.response && error.response.status === 429) {
-                limiterScore += 5;
-                console.warn(`Worker ${process.pid} received 429 (Too Many Requests). Increasing limiter score to ${limiterScore}.`);
-                localError++;
-            } else if (error.response && error.response.status >= 500) {
-                limiterScore += 3;
-                localError++;
-            } else if (error.code === 'ECONNABORTED' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+            // Log a small sample of errors for visibility without flooding the console
+            if (Math.random() < 0.01) { // Log ~1% of errors
+                if (error.response) {
+                    console.warn(`Worker ${process.pid} sample error: HTTP ${error.response.status}`);
+                } else if (error.request) {
+                    console.warn(`Worker ${process.pid} sample error: Network ${error.code}`);
+                } else {
+                    console.error(`Worker ${process.pid} sample error: Setup ${error.message}`);
+                }
+            }
+
+            // Adjust limiter score based on error type for self-throttling
+            if (error.response) {
+                if (error.response.status === 429) { // Too Many Requests
+                    limiterScore += 5;
+                } else if (error.response.status >= 500) { // Server-side errors
+                    limiterScore += 3;
+                }
+            } else if (error.request) { // Network errors (timeout, etc.)
                 limiterScore += 1;
-                localError++;
-            } else {
-                localError++;
             }
         };
 
