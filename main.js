@@ -11,6 +11,16 @@ const LOCAL_PROXY_PORT = 9999;
 function startSelfMadeProxy() {
     const proxy = httpProxy.createProxyServer({});
 
+    proxy.on('error', (err, req, res) => {
+        console.error('Proxy server error:', err.message);
+        if (res && !res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'text/plain' });
+            res.end('Proxy error occurred.');
+        } else if (res && res.socket) {
+            res.socket.end();
+        }
+    });
+
     const server = http.createServer((req, res) => {
         proxy.web(req, res, { target: req.url, changeOrigin: true }, (err) => {
             if (!res.headersSent) {
@@ -30,12 +40,19 @@ function startSelfMadeProxy() {
                     '\r\n'
                 );
                 serverSocket.write(head);
-                serverSocket.pipe(clientSocket).on('error', () => {});
-                clientSocket.pipe(serverSocket).on('error', () => {});
+                serverSocket.pipe(clientSocket).on('error', (err) => {
+                    console.error('Proxy: serverSocket to clientSocket pipe error:', err.message);
+                });
+                clientSocket.pipe(serverSocket).on('error', (err) => {
+                    console.error('Proxy: clientSocket to serverSocket pipe error:', err.message);
+                });
             });
 
             serverSocket.on('error', (err) => {
-                clientSocket.end(`HTTP/1.1 500 ${err.message}\r\n\r\n`);
+                console.error('Proxy: serverSocket connection error:', err.message);
+                try {
+                    clientSocket.end(`HTTP/1.1 500 ${err.message}\r\n\r\n`);
+                } catch (e) { /* client socket may already be closed */ }
             });
         } else {
             clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');

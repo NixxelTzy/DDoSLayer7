@@ -12,6 +12,11 @@ let currentAttack = null;
 
 console.log("Bot berhasil dijalankan...");
 
+bot.on('polling_error', (error) => {
+    console.error(`[Telegram Polling Error]: ${error.code} - ${error.message}`);
+    // This error (especially 409 Conflict) is often due to multiple bot instances running.
+});
+
 const isUserAuthorized = (chatId) => {
     if (chatId !== AUTHORIZED_USER_ID) {
         bot.sendMessage(chatId, "Maaf, Anda tidak diizinkan menggunakan bot ini.");
