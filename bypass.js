@@ -162,10 +162,13 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
             if (error.response && error.response.status === 429) {
                 limiterScore += 5;
                 console.warn(`Worker ${process.pid} received 429 (Too Many Requests). Increasing limiter score to ${limiterScore}.`);
+                localError++;
             } else if (error.response && error.response.status >= 500) {
                 limiterScore += 3;
+                localError++;
             } else if (error.code === 'ECONNABORTED' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
                 limiterScore += 1;
+                localError++;
             } else {
                 localError++;
             }
