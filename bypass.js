@@ -38,7 +38,6 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     let localError = 0;
     const target = url.parse(targetUrl);
     const controller = new AbortController();
-    controller.signal.setMaxListeners(0); // Unlimited listeners for the abort signal
 
     let attackState = {
         phase: 'RAMP_UP',
