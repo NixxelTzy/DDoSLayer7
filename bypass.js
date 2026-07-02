@@ -21,7 +21,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         phaseEndTime: Date.now() + (2000 + Math.random() * 2000),
         streams: 50,
     };
-    const ORIGINAL_MAX_STREAMS = 150; // Intensitas dikurangi dari 600
+    const ORIGINAL_MAX_STREAMS = 250; // Intensitas dinaikkan sedikit sesuai permintaan
     const MIN_STREAMS = 25; // Batas bawah juga diturunkan
 
     // --- Kontrol Memori Otomatis untuk Mencegah "Out of Memory" ---

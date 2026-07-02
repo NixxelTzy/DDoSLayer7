@@ -134,8 +134,13 @@ function getAxiosOptions(target, proxyString, signal) {
 
     const options = {
         headers: headers,
-        timeout: 15000,
+        timeout: 8000, // Turunkan timeout agar fail-fast dan tidak menunggu terlalu lama
         signal: signal,
+        // Jangan anggap status code 4xx (mis. 429, 403, 404) sebagai error.
+        // Ini akan secara signifikan mengurangi jumlah 'Total Error' yang dilaporkan,
+        // karena server yang bertahan (seperti Vercel) akan merespons dengan kode ini.
+        // Hanya error jaringan atau error server (5xx) yang akan dihitung.
+        validateStatus: (status) => status < 500,
     };
 
     // Konfigurasi proxy untuk Axios
