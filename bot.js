@@ -175,7 +175,7 @@ bot.on('message', async (msg) => {
 *Target:* \`${url}\`
 *Durasi Total:* \`${duration} detik\`
                 `;
-                bot.editMessageText(statusText, {
+                bot.editMessageText(finalText, {
                     chat_id: chatId,
                     message_id: messageId,
                     parse_mode: 'Markdown'

