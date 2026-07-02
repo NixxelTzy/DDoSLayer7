@@ -85,62 +85,65 @@ function getAxiosOptions(target, proxyString, signal) {
     const persona = randomChoice(browserPersonas);
     const fetchDest = randomChoice(sec_fetch_dest_pool);
 
-    const headers = {
-        'User-Agent': persona.ua,
-        'Accept': getDynamicAcceptHeader(fetchDest),
-        'Accept-Encoding': randomChoice(accept_encoding_pool),
-        'Accept-Language': generateRealisticAcceptLanguage(),
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Upgrade-Insecure-Requests': '1',
-        'Connection': 'keep-alive',
-        // Header sidik jari perangkat
-        'Device-Memory': randomChoice(device_memory_pool),
-        'Viewport-Width': randomChoice(viewport_width_pool),
-        // Header Sec-Fetch untuk konteks
-        'Sec-Fetch-Dest': fetchDest,
-        'Sec-Fetch-User': '?1',
-        // Header Spoofing & Bypass
-        'X-Forwarded-For': `${crypto.randomInt(1, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(1, 255)}`,
-        'X-Forwarded-Proto': 'https',
-    };
+    // --- Randomisasi Urutan Header ---
+    // WAF dapat melakukan fingerprinting berdasarkan urutan header.
+    // Kita acak urutannya agar terlihat seperti berasal dari berbagai klien.
+    let headersArray = [
+        ['User-Agent', persona.ua],
+        ['Accept', getDynamicAcceptHeader(fetchDest)],
+        ['Accept-Encoding', randomChoice(accept_encoding_pool)],
+        ['Accept-Language', generateRealisticAcceptLanguage()],
+        ['Cache-Control', 'no-cache'],
+        ['Pragma', 'no-cache'],
+        ['Upgrade-Insecure-Requests', '1'],
+        ['Connection', 'keep-alive'],
+        ['Device-Memory', randomChoice(device_memory_pool)],
+        ['Viewport-Width', randomChoice(viewport_width_pool)],
+        ['Sec-Fetch-Dest', fetchDest],
+        ['Sec-Fetch-User', '?1'],
+        ['X-Forwarded-For', `${crypto.randomInt(1, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(0, 255)}.${crypto.randomInt(1, 255)}`],
+        ['X-Forwarded-Proto', 'https'],
+    ];
 
     // Tambahkan header Client-Hints jika persona mendukungnya
     if (persona.sec_ch_ua) {
-        headers['sec-ch-ua'] = persona.sec_ch_ua;
-        headers['sec-ch-ua-mobile'] = '?0';
-        headers['sec-ch-ua-platform'] = persona.platform;
+        headersArray.push(['sec-ch-ua', persona.sec_ch_ua]);
+        headersArray.push(['sec-ch-ua-mobile', '?0']);
+        headersArray.push(['sec-ch-ua-platform', persona.platform]);
     }
 
     // Atur Sec-Fetch-Site, Mode, dan Referer secara dinamis
     const siteChoice = Math.random();
     if (siteChoice < 0.5) { // 50% - Navigasi dari luar
-        headers['Sec-Fetch-Site'] = 'none';
-        headers['Sec-Fetch-Mode'] = 'navigate';
+        headersArray.push(['Sec-Fetch-Site', 'none']);
+        headersArray.push(['Sec-Fetch-Mode', 'navigate']);
     } else if (siteChoice < 0.8) { // 30% - Request dari halaman yang sama
-        headers['Sec-Fetch-Site'] = 'same-origin';
-        headers['Sec-Fetch-Mode'] = 'cors';
-        headers['Referer'] = `${target.protocol}//${target.host}/${crypto.randomBytes(4).toString('hex')}`;
+        headersArray.push(['Sec-Fetch-Site', 'same-origin']);
+        headersArray.push(['Sec-Fetch-Mode', 'cors']);
+        headersArray.push(['Referer', `${target.protocol}//${target.host}/${crypto.randomBytes(4).toString('hex')}`]);
     } else { // 20% - Request dari situs lain
-        headers['Sec-Fetch-Site'] = 'cross-site';
-        headers['Sec-Fetch-Mode'] = 'cors';
-        headers['Referer'] = randomChoice(referers);
+        headersArray.push(['Sec-Fetch-Site', 'cross-site']);
+        headersArray.push(['Sec-Fetch-Mode', 'cors']);
+        headersArray.push(['Referer', randomChoice(referers)]);
     }
 
     // Simulasikan request AJAX
     if (fetchDest === 'empty') {
-        headers['X-Requested-With'] = 'XMLHttpRequest';
+        headersArray.push(['X-Requested-With', 'XMLHttpRequest']);
     }
+
+    // Acak array dan ubah menjadi objek
+    const headers = Object.fromEntries(headersArray.sort(() => Math.random() - 0.5));
 
     const options = {
         headers: headers,
         timeout: 8000, // Turunkan timeout agar fail-fast dan tidak menunggu terlalu lama
         signal: signal,
-        // Jangan anggap status code 4xx (mis. 429, 403, 404) sebagai error.
-        // Ini akan secara signifikan mengurangi jumlah 'Total Error' yang dilaporkan,
-        // karena server yang bertahan (seperti Vercel) akan merespons dengan kode ini.
-        // Hanya error jaringan atau error server (5xx) yang akan dihitung.
-        validateStatus: (status) => status < 500,
+        // Anggap semua status di bawah 500 sebagai "sukses" KECUALI 429.
+        // Ini memungkinkan kita untuk secara spesifik menangkap sinyal 'Too Many Requests'
+        // di blok .catch() sebagai pemicu untuk sistem anti-limiter,
+        // sambil tetap mengabaikan error 4xx lainnya (seperti 403, 404).
+        validateStatus: (status) => status < 500 && status !== 429,
     };
 
     // Konfigurasi proxy untuk Axios

