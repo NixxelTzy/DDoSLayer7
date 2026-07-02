@@ -204,19 +204,17 @@ function generateComplexJsonPayload() {
     return JSON.stringify(data);
 }
 
-const jsonPayloadPool = Array.from({ length: 25 }, generateComplexJsonPayload);
-const urlEncodedPayloadPool = Array.from({ length: 25 }, generateUrlEncodedPayload);
-
 const getRandomPayload = () => {
     const choice = Math.random();
     if (choice < 0.5) { // 50% JSON
         return {
-            payload: JSON.parse(randomChoice(jsonPayloadPool)),
+            // Buat payload on-the-fly untuk menghemat memori, jangan gunakan pool.
+            payload: JSON.parse(generateComplexJsonPayload()),
             type: 'json'
         };
     } else { // 50% URL Encoded
         return {
-            payload: new URLSearchParams(randomChoice(urlEncodedPayloadPool)),
+            payload: new URLSearchParams(generateUrlEncodedPayload()),
             type: 'form'
         };
     }
