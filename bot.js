@@ -1,9 +1,9 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { startNuclearFlood } = require('./main.js');
 
-const TOKEN = "8962044822:AAGNjh-qyQQsFY6SitarRFMzr5DepQOCNmY"; 
+const TOKEN = "8962044822:AAGNjh-qyQQsFY6SitarRFMzr5DepQOCNmY";
 
-const AUTHORIZED_USER_ID = 8710323660; 
+const AUTHORIZED_USER_ID = 8710323660;
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
@@ -151,7 +151,7 @@ bot.on('message', async (msg) => {
                         chat_id: chatId,
                         message_id: messageId,
                         parse_mode: 'Markdown'
-                    }).catch(() => {}); // Ignore errors like "message is not modified"
+                    }).catch(() => {});
                     lastMessageText = statusText;
                 }
             };
@@ -164,7 +164,7 @@ bot.on('message', async (msg) => {
                     chat_id: chatId,
                     message_id: messageId,
                 });
-                delete userState[chatId]; // Reset state
+                delete userState[chatId];
                 return;
             }
 
@@ -193,7 +193,7 @@ bot.on('message', async (msg) => {
         } catch (error) {
             console.error("Error fatal saat persiapan serangan:", error);
             bot.sendMessage(chatId, `❌ Terjadi error yang tidak terduga: ${error.message}. Silakan periksa log.`);
-            delete userState[chatId]; // Reset state
+            delete userState[chatId];
         }
     }
 });

